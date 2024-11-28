@@ -1,0 +1,13 @@
+useDynLib(h5mread)
+
+import(methods)
+
+### We import rhdf5filters only for the side effect of setting system
+### environment variable HDF5_PLUGIN_PATH to rhdf5filters::hdf5_plugin_path().
+### This is done by rhdf5filters:::.onLoad(). The only filter we actually
+### care about at the moment is LZF.
+import(rhdf5filters)
+import(rhdf5)
+import(S4Vectors)
+import(SparseArray)
+

@@ -11,7 +11,7 @@ Encoding: UTF-8
 Authors@R: person("Hervé", "Pagès", role=c("aut", "cre"),
 	          email="hpages.on.github@gmail.com",
 		  comment=c(ORCID="0009-0002-8272-4522"))
-Depends: methods, SparseArray, rhdf5
+Depends: methods, rhdf5, SparseArray
 Imports: rhdf5filters, S4Vectors
 LinkingTo: Rhdf5lib, S4Vectors
 SystemRequirements: GNU make
