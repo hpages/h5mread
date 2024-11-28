@@ -5,7 +5,7 @@ Description: The main function in the h5mread package is h5mread(), which
 	the h5read() function from the rhdf5 package does.
 	In the case of h5mread(), the implementation has been optimized to
 	make it as fast and memory-efficient as possible.
-Version: 0.0.1
+Version: 0.1.0
 License: Artistic-2.0
 Encoding: UTF-8
 Authors@R: person("Hervé", "Pagès", role=c("aut", "cre"),
