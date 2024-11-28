@@ -1,6 +1,7 @@
 useDynLib(h5mread)
 
 import(methods)
+importFrom(tools, file_path_as_absolute)
 
 ### We import rhdf5filters only for the side effect of setting system
 ### environment variable HDF5_PLUGIN_PATH to rhdf5filters::hdf5_plugin_path().
@@ -8,6 +9,65 @@ import(methods)
 ### care about at the moment is LZF.
 import(rhdf5filters)
 import(rhdf5)
+import(BiocGenerics)
 import(S4Vectors)
 import(SparseArray)
+
+
+### - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+### Export S4 classes
+###
+
+exportClasses(
+    H5FileID, H5File, character_OR_H5File,
+    H5DSetDescriptor
+)
+
+
+### - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+### Export S3 methods
+###
+
+S3method(close, H5FileID)
+S3method(close, H5File)
+
+S3method(open, H5FileID)
+S3method(open, H5File)
+
+### We also export them thru the export() directive so that (a) they can be
+### called directly, (b) tab-completion on the name of the generic shows them,
+### and (c) methods() doesn't asterisk them.
+
+export(
+    close.H5FileID,
+    close.H5File,
+
+    open.H5FileID,
+    open.H5File
+)
+
+
+### - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+### Export S4 methods for generics not defined in h5mread
+###
+
+exportMethods(
+    ## Methods for generics defined in the methods package:
+    show,
+
+    ## Methods for generics defined in the BiocGenerics package:
+    path
+)
+
+
+### - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+### Export non-generic functions
+###
+
+export(
+    H5FileID, H5File,
+    h5ls,
+    H5DSetDescriptor, destroy_H5DSetDescriptor,
+    get_h5mread_returned_type, h5mread
+)
 

@@ -1,0 +1,41 @@
+### =========================================================================
+### H5DSetDescriptor objects
+### -------------------------------------------------------------------------
+
+
+setClass("H5DSetDescriptor",
+    representation(
+        xp="externalptr"
+    )
+)
+
+.destroy_H5DSetDescriptor_xp <- function(xp)
+{
+    .Call2("C_destroy_H5DSetDescriptor_xp", xp, PACKAGE="h5mread")
+}
+
+H5DSetDescriptor <- function(filepath, name, as.integer=FALSE)
+{
+    if (!is(filepath, "H5File")) {
+        filepath <- H5File(filepath, .no_rhdf5_h5id=TRUE)
+        on.exit(close(filepath))
+    }
+    name <- normarg_h5_name(name)
+
+    xp <- .Call2("C_new_H5DSetDescriptor_xp", filepath, name, as.integer,
+                                              PACKAGE="h5mread")
+    reg.finalizer(xp, .destroy_H5DSetDescriptor_xp, onexit=TRUE)
+    Class <- getClassDef("H5DSetDescriptor", package="h5mread", inherits=FALSE)
+    new2(Class, xp=xp)
+}
+
+destroy_H5DSetDescriptor <- function(x)
+{
+    invisible(.destroy_H5DSetDescriptor_xp(x@xp))
+}
+
+setMethod("show", "H5DSetDescriptor",
+    function(object)
+        .Call2("C_show_H5DSetDescriptor_xp", object@xp, PACKAGE="h5mread")
+)
+

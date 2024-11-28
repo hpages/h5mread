@@ -5,16 +5,25 @@ Description: The main function in the h5mread package is h5mread(), which
 	the h5read() function from the rhdf5 package does.
 	In the case of h5mread(), the implementation has been optimized to
 	make it as fast and memory-efficient as possible.
-Version: 0.0.0
+Version: 0.0.1
 License: Artistic-2.0
 Encoding: UTF-8
 Authors@R: person("Hervé", "Pagès", role=c("aut", "cre"),
 	          email="hpages.on.github@gmail.com",
 		  comment=c(ORCID="0009-0002-8272-4522"))
-Depends: methods, rhdf5, SparseArray
-Imports: rhdf5filters, S4Vectors
+Depends: methods, rhdf5, BiocGenerics, SparseArray
+Imports: tools, rhdf5filters, S4Vectors
 LinkingTo: Rhdf5lib, S4Vectors
 SystemRequirements: GNU make
 Suggests: BiocParallel, ExperimentHub, HDF5Array,
 	testthat, knitr, rmarkdown, BiocStyle
 VignetteBuilder: knitr
+Collate: utils.R
+	H5File-class.R
+	h5ls.R
+	H5DSetDescriptor-class.R
+	h5dimscales.R
+	uaselection.R
+	h5mread.R
+	h5summarize.R
+	zzz.R
