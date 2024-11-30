@@ -1,0 +1,8 @@
+- Add multithreading capabilities to h5mread().
+
+- Resume work on h5summarize().
+
+- The reshaping operation that is currently performed by
+  h5mread_from_reshaped() should instead be implemented as a
+  delayed operation on DelayedArray objects.
+

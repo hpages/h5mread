@@ -3,6 +3,7 @@
 ### -------------------------------------------------------------------------
 
 
+### Not exported yet, needs more work...
 h5summarize <- function(filepath, name, index=NULL, as.integer=FALSE,
                         op, na.rm=FALSE, verbose=FALSE)
 {

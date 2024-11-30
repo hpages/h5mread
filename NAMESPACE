@@ -1,6 +1,7 @@
 useDynLib(h5mread)
 
 import(methods)
+importFrom(stats, setNames)
 importFrom(tools, file_path_as_absolute)
 
 ### We import rhdf5filters only for the side effect of setting system
@@ -11,6 +12,8 @@ import(rhdf5filters)
 import(rhdf5)
 import(BiocGenerics)
 import(S4Vectors)
+import(IRanges)
+import(S4Arrays)
 import(SparseArray)
 
 
@@ -68,6 +71,9 @@ export(
     H5FileID, H5File,
     h5ls,
     H5DSetDescriptor, destroy_H5DSetDescriptor,
-    get_h5mread_returned_type, h5mread
+    get_h5mread_returned_type, h5mread,
+    find_dims_to_collapse, h5mread_from_reshaped,
+    set_h5dimnames, get_h5dimnames, validate_lengths_of_h5dimnames,
+    h5writeDimnames, h5readDimnames
 )
 
