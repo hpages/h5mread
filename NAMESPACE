@@ -68,11 +68,25 @@ exportMethods(
 ###
 
 export(
+    ## h5dim.R:
+    h5exists, h5dim, h5chunkdim,
+
+    ## H5File-class.R:
     H5FileID, H5File,
+
+    ## h5ls.R:
     h5ls,
+
+    ## H5DSetDescriptor-class.R:
     H5DSetDescriptor, destroy_H5DSetDescriptor,
+
+    ## h5mread.R:
     get_h5mread_returned_type, h5mread,
+
+    ## h5mread_from_reshaped.R:
     find_dims_to_collapse, h5mread_from_reshaped,
+
+    ## h5writeDimnames.R:
     set_h5dimnames, get_h5dimnames, validate_lengths_of_h5dimnames,
     h5writeDimnames, h5readDimnames
 )

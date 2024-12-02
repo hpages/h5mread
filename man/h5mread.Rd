@@ -67,9 +67,6 @@ get_h5mread_returned_type(filepath, name, as.integer=FALSE)
     selection described by \code{starts} and \code{counts} must be
     \emph{strictly ascending} along each dimension.
   }
-  \item{noreduce}{
-    TODO
-  }
   \item{as.vector}{
     Should the data be returned in a vector instead of an array?
     By default (i.e. when set to \code{NA}), the data is returned in an
@@ -79,21 +76,25 @@ get_h5mread_returned_type(filepath, name, as.integer=FALSE)
     or \code{FALSE}.
   }
   \item{as.integer}{
-    TODO
+    If set to \code{TRUE} then the data is loaded in an ordinary array
+    (or vector) of \code{type()} \code{"integer"}. This will typically
+    reduce the memory footprint of the returned array or vector by half
+    if the values in the HDF5 dataset are floating point values.
+
+    Note that, when \code{as.integer=TRUE}, the values loaded from the
+    HDF5 dataset get coerced to integers at the C level as early as possible
+    so this transformation is very efficient.
   }
   \item{as.sparse}{
-    TODO
+    By default \code{h5mread()} returns the data in an ordinary
+    array or vector. Use \code{as.sparse=TRUE} to return it in a
+    \link[SparseArray]{SparseArray} derivative from the \pkg{SparseArray}
+    package. This will significantly reduce the memory footprint
+    of the returned object if the HDF5 dataset contains mostly zeros.
   }
-  \item{method}{
-    TODO
+  \item{noreduce, method, use.H5Dread_chunk}{
+    For testing and advanced usage only. Do not use.
   }
-  \item{use.H5Dread_chunk}{
-    TODO
-  }
-}
-
-\details{
-  DETAILS COMING SOON...
 }
 
 \value{
@@ -128,7 +129,7 @@ get_h5mread_returned_type(filepath, name, as.integer=FALSE)
 
 \examples{
 ## ---------------------------------------------------------------------
-## BASIC USAGE
+## BASIC EXAMPLES
 ## ---------------------------------------------------------------------
 test_h5 <- system.file("extdata", "test.h5", package="h5mread")
 h5ls(test_h5)
@@ -165,16 +166,20 @@ stopifnot(identical(m2a, m2b))
 
 a3 <- h5mread(test_h5, "a3")  # 180 x 75 x 4 integer array
 
-starts <- list(c(21, 101), NULL, 4)
+starts <- list(c(21, 101), NULL, 3:4)
 counts <- list(c( 5,  22), NULL, NULL)
 a <- h5mread(test_h5, "a3", starts=starts, counts=counts)
-a
+dim(a)
+a[1:10, 1:12, ]
 
 ## Sanity check:
-stopifnot(identical(a3[c(21:25, 101:122), , 4, drop=FALSE], a))
+stopifnot(identical(a3[c(21:25, 101:122), , 3:4, drop=FALSE], a))
 
-## Load the data in a sparse array representation:
-starts <- list(c(21:25, 101:122), NULL, 4:3)
+## ---------------------------------------------------------------------
+## RETURNING THE DATA AS A SPARSE ARRAY
+## ---------------------------------------------------------------------
+
+starts <- list(c(21:25, 101:122), NULL, 3:4)
 coo <- h5mread(test_h5, "a3", starts=starts, as.sparse=TRUE)
 coo
 
@@ -182,7 +187,6 @@ class(coo)  # COO_SparseArray object (see ?COO_SparseArray)
 dim(coo)
 
 ## Sanity check:
-a <- h5mread(test_h5, "a3", starts=starts)
 stopifnot(is(coo, "COO_SparseArray"), identical(a, as.array(coo)))
 
 ## ---------------------------------------------------------------------
@@ -226,7 +230,7 @@ stopifnot(identical(a, as.array(coo)))
 
 ## The bigger the selection, the greater the speedup between
 ## h5read() and h5mread():
-\dontrun{
+\donttest{
   index <- list(sample(27998, 1000), sample(1306127, 1000))
   ## h5mread() about 4x faster than h5read() (12s vs 48s):
   system.time(a <- h5mread::h5mread(fname1, "counts", index))

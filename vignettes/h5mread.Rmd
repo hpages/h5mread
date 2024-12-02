@@ -1,0 +1,193 @@
+---
+title: "The _h5mread_ package"
+author:
+- name: Hervé Pagès
+  affiliation: Fred Hutchinson Cancer Research Center, Seattle, WA
+date: "Compiled `r doc_date()`; Modified 1 December 2024"
+package: h5mread
+vignette: |
+  %\VignetteIndexEntry{The h5mread package}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+output:
+  BiocStyle::html_document
+---
+
+
+# Introduction
+
+`r Biocpkg("h5mread")` is an R/Bioconductor package that allows fast and
+memory-efficient loading of HDF5 data into R. The main function in the
+package is `h5mread()` which allows reading arbitrary data from an HDF5
+dataset into R, similarly to what the `h5read()` function from the
+`r Biocpkg("rhdf5")`  package does. In the case of `h5mread()`, the
+implementation has been optimized to make it as fast and memory-efficient
+as possible.
+
+In addition to the `h5mread()` function the package also provides the
+following low-level functionality:
+
+- `h5dim()` and `h5chunkdim()`;
+
+- Utility functions to manipulate the dimnames of an HDF5 dataset;
+
+- H5File objects to facilitate access to remote HDF5 files like files
+  stored in an Amazon S3 bucket.
+
+Note that the primary use case for the `r Biocpkg("h5mread")` package
+is to support higher-level functionality implemented in
+the `r Biocpkg("HDF5Array")` package.
+
+
+# Install and load the package
+
+Like any other Bioconductor package, `r Biocpkg("h5mread")` should always
+be installed with `BiocManager::install()`:
+```{r, eval=FALSE}
+if (!require("BiocManager", quietly=TRUE))
+    install.packages("BiocManager")
+BiocManager::install("h5mread")
+```
+
+Load the package:
+```{r, message=FALSE}
+library(h5mread)
+```
+
+
+# The h5mread() function
+
+`h5mread()` is an efficient and flexible alternative to `rhdf5::h5read()`.
+
+Note that we'll use `writeHDF5Array()` from the `r Biocpkg("HDF5Array")`
+package to conveniently create the HDF5 datasets used in the examples below.
+
+## Basic example
+
+Create a 70,000 x 1,500 random dataset:
+```{r, results='hide', message=FALSE}
+set.seed(2009)
+m0 <- matrix(runif(105e6), ncol=1500)  # 70,000 x 1,500 matrix
+temp0_h5 <- tempfile(fileext=".h5")
+HDF5Array::writeHDF5Array(m0, temp0_h5, "m0", chunkdim=c(100, 100))
+```
+
+Load 1,000 random rows from the HDF5 dataset:
+```{r}
+h5ls(temp0_h5)
+nrow0 <- h5dim(temp0_h5, "m0")[[1L]]
+starts <- list(sample(nrow0, 1000), NULL)
+m <- h5mread(temp0_h5, "m0", starts=starts)
+```
+
+See `?h5mread` for more information and additional examples.
+
+Sanity check:
+```{r}
+stopifnot(identical(m, m0[starts[[1L]], ]))
+```
+
+## An example involving sparse data
+
+The HDF5 format doesn't natively support sparse data representation.
+However, because it stores the data in compressed chunks, sparse data
+gets efficiently compressed in the HDF5 file.
+
+The more sparse the data, the smaller the resulting HDF5 file:
+```{r, results='hide'}
+a1 <- poissonSparseArray(c(6100, 960, 75), density=0.5)
+a2 <- poissonSparseArray(c(6100, 960, 75), density=0.05)
+
+temp1_h5 <- tempfile(fileext=".h5")
+HDF5Array::writeHDF5Array(a1, temp1_h5, "a1", chunkdim=c(50, 40, 5), level=5)
+temp2_h5 <- tempfile(fileext=".h5")
+HDF5Array::writeHDF5Array(a2, temp2_h5, "a2", chunkdim=c(50, 40, 5), level=5)
+```
+
+```{r}
+file.size(temp1_h5)
+file.size(temp2_h5)
+```
+
+However, the small size on disk won't translate into a small size in memory
+if the data gets loaded back as an ordinary array:
+```{r}
+a21 <- h5mread(temp2_h5, "a2")  # not memory-efficient
+object.size(a21)
+```
+
+To keep memory usage as low as possible, `h5mread()` can load the data in
+a SparseArray derivative from the `r Biocpkg("SparseArray")` package. This
+is achieved by setting its `as.sparse` argument to `TRUE`:
+```{r}
+a22 <- h5mread(temp2_h5, "a2", as.sparse=TRUE)  # memory-efficient
+object.size(a22)
+```
+
+Note that the data is loaded as a COO\_SparseArray object:
+```{r}
+class(a22)
+```
+
+See `?h5mread` for more information and additional examples.
+
+Sanity checks:
+```{r}
+stopifnot(
+  identical(a21, as.array(a2)),
+  is(a22, "COO_SparseArray"),
+  identical(as.array(a22), as.array(a2))
+)
+```
+
+## A note about COO\_SparseArray objects
+
+The COO\_SparseArray class is one of the two SparseArray concrete
+subclasses defined in the `r Biocpkg("SparseArray")` package, the other
+one being SVT\_SparseArray. Note that the latter tends to be even more
+memory-efficient than the former and to achieve better performance overall.
+
+Use coercion to switch back and forth between the two representations:
+```{r}
+a22 <- as(a22, "SVT_SparseArray")
+class(a22)
+```
+
+About half the memory footprint of the COO\_SparseArray representation:
+```{r}
+object.size(a22)
+```
+
+See `?SparseArray` in the `r Biocpkg("SparseArray")` package for more
+information.
+
+
+# Other functionality provided by the h5mread package
+
+## h5dim() and h5chunkdim()
+
+Two convenience functions to obtain the dimensions of an HDF5
+dataset as well as the dimensions of its chunks.
+
+See `?h5dim` for more information and some examples.
+
+## Utility functions to manipulate the dimnames of an HDF5 dataset
+
+A small set of low-level utilities is provided to manipulate the
+dimnames of an HDF5 dataset.
+
+See `?h5writeDimnames` for more information and some examples.
+
+## H5File objects
+
+Use an H5File object to access an HDF5 file stored in an Amazon S3 bucket.
+
+See `?H5File` for more information and some examples.
+
+
+# Session information
+
+```{r}
+sessionInfo()
+```
+

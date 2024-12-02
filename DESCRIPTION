@@ -1,11 +1,14 @@
 Package: h5mread
 Title: A fast HDF5 reader
 Description: The main function in the h5mread package is h5mread(), which
-	allows reading data from an HDF5 dataset into R, similarly to what
-	the h5read() function from the rhdf5 package does.
+	allows reading arbitrary data from an HDF5 dataset into R, similarly
+	to what the h5read() function from the rhdf5 package does.
 	In the case of h5mread(), the implementation has been optimized to
 	make it as fast and memory-efficient as possible.
-Version: 0.2.0
+biocViews: Infrastructure, DataRepresentation, DataImport
+URL: https://bioconductor.org/packages/h5mread
+BugReports: https://github.com/hpages/h5mread/issues
+Version: 0.99.0
 License: Artistic-2.0
 Encoding: UTF-8
 Authors@R: person("Hervé", "Pagès", role=c("aut", "cre"),
@@ -19,6 +22,7 @@ Suggests: BiocParallel, ExperimentHub, HDF5Array,
 	testthat, knitr, rmarkdown, BiocStyle
 VignetteBuilder: knitr
 Collate: utils.R
+	h5dim.R
 	H5File-class.R
 	h5ls.R
 	H5DSetDescriptor-class.R

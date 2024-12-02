@@ -1,5 +1,8 @@
 - Add multithreading capabilities to h5mread().
 
+- Make h5mread(..., as.sparse=TRUE) natively return an SVT_SparseArray rather
+  than a COO_SparseArray object.
+
 - Resume work on h5summarize().
 
 - The reshaping operation that is currently performed by
