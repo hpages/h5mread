@@ -1,6 +1,7 @@
 ## This file uses GNU make syntax $(shell ...) so we need to
 ## have "SystemRequirements: GNU make" in the DESCRIPTION file.
 
+
 OBJECTS = \
     S4Vectors_stubs.o \
     H5File.o \
@@ -10,7 +11,7 @@ OBJECTS = \
     uaselection.o \
     h5mread_helpers.o \
     h5mread_startscounts.o \
-    ChunkIterator.o \
+    TouchedChunks.o \
     h5mread_index.o \
     h5mread_sparse.o \
     h5mread.o \

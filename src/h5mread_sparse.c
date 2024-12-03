@@ -7,7 +7,7 @@
 #include "global_errmsg_buf.h"
 #include "uaselection.h"
 #include "h5mread_helpers.h"
-#include "ChunkIterator.h"
+#include "TouchedChunks.h"
 
 #include <string.h>  /* for memcpy */
 #include <limits.h>  /* for INT_MAX */
@@ -181,12 +181,12 @@ static long long int copy_selected_string_chunk_data_to_CharAEAE_buf(
 		const char *in,
 		IntAEAE *nzcoo_bufs, CharAEAE *nzdata_buf)
 {
-	const H5DSetDescriptor *h5dset = chunk_iter->h5dset;
+	const H5DSetDescriptor *h5dset = chunk_iter->touched_chunks->h5dset;
 	int ndim = h5dset->ndim;
 	size_t h5type_size = h5dset->h5type->h5type_size;
 	size_t in_offset;
 	_init_in_offset(ndim,
-			chunk_iter->index,
+			chunk_iter->touched_chunks->index,
 			h5dset->h5chunkdim,
 			&chunk_iter->mem_vp,
 			&chunk_iter->h5dset_vp,
@@ -211,7 +211,7 @@ static long long int copy_selected_string_chunk_data_to_CharAEAE_buf(
 		if (inner_moved_along == ndim)
 			break;
 		update_in_offset(ndim,
-				 chunk_iter->index,
+				 chunk_iter->touched_chunks->index,
 				 h5dset->h5chunkdim,
 				 &chunk_iter->mem_vp,
 				 inner_midx_buf,
@@ -226,85 +226,85 @@ static long long int copy_selected_string_chunk_data_to_CharAEAE_buf(
    (this is 'chunk_data_buf->data' and it gets passed to the 'in' pointer),
    that is, if the current chunk is a full-size chunk and not a "truncated"
    chunk (a.k.a. "partial edge chunk" in HDF5's terminology). */
-#define	ARGS_AND_BODY_OF_COPY_FUNCTION(in_type, nzdatabuf_type)(	 \
-		const ChunkIterator *chunk_iter, size_t *inner_midx_buf, \
-		const in_type *in,					 \
-		IntAEAE *nzcoo_bufs, nzdatabuf_type *nzdata_buf)	 \
-{									 \
-	const H5DSetDescriptor *h5dset = chunk_iter->h5dset;		 \
-	int ndim = h5dset->ndim;					 \
-	int do_fast_walk = _tchunk_is_fully_selected(ndim,		 \
-					&chunk_iter->h5dset_vp,		 \
-					&chunk_iter->mem_vp)		 \
-			   && ! _tchunk_is_truncated(h5dset,		 \
-					&chunk_iter->h5dset_vp);	 \
-	if (do_fast_walk) {						 \
-		while (1) {						 \
-			in_type val = *in;				 \
-			if (val != (in_type) 0) {			 \
-				if (nzdata_buf->_nelt >=		 \
-				    NZDATA_MAXLENGTH)			 \
-				{					 \
-					PRINT_TO_ERRMSG_BUF(		 \
-						"too many non-zero "	 \
-						"values to load");	 \
-					return -1;			 \
-				}					 \
-				nzdatabuf_type ## _fast_append(		 \
-						nzdata_buf, val);	 \
-				append_array_index_to_nzcoo_bufs(	 \
-						&chunk_iter->mem_vp,	 \
-						inner_midx_buf,		 \
-						nzcoo_bufs);		 \
-			}						 \
-			int inner_moved_along = next_midx(ndim,		 \
-						chunk_iter->mem_vp.dim,	 \
-						inner_midx_buf);	 \
-			if (inner_moved_along == ndim)			 \
-				break;					 \
-			in++;						 \
-		};							 \
-	} else {							 \
-		size_t in_offset;					 \
-		_init_in_offset(ndim,					 \
-				chunk_iter->index,			 \
-				h5dset->h5chunkdim,			 \
-				&chunk_iter->mem_vp,			 \
-				&chunk_iter->h5dset_vp,			 \
-				&in_offset);				 \
-		while (1) {						 \
-			in_type val = in[in_offset];			 \
-			if (val != (in_type) 0) {			 \
-				if (nzdata_buf->_nelt >=		 \
-				    NZDATA_MAXLENGTH)			 \
-				{					 \
-					PRINT_TO_ERRMSG_BUF(		 \
-						"too many non-zero "	 \
-						"values to load");	 \
-					return -1;			 \
-				}					 \
-				nzdatabuf_type ## _fast_append(		 \
-						nzdata_buf, val);	 \
-				append_array_index_to_nzcoo_bufs(	 \
-						&chunk_iter->mem_vp,	 \
-						inner_midx_buf,		 \
-						nzcoo_bufs);		 \
-			}						 \
-			int inner_moved_along = next_midx(ndim,		 \
-						chunk_iter->mem_vp.dim,	 \
-						inner_midx_buf);	 \
-			if (inner_moved_along == ndim)			 \
-				break;					 \
-			update_in_offset(ndim,				 \
-					 chunk_iter->index,		 \
-					 h5dset->h5chunkdim,		 \
-					 &chunk_iter->mem_vp,		 \
-					 inner_midx_buf,		 \
-					 inner_moved_along,		 \
-					 &in_offset);			 \
-		};							 \
-	}								 \
-	return (long long int) nzdatabuf_type ## _get_nelt(nzdata_buf);	 \
+#define	ARGS_AND_BODY_OF_COPY_FUNCTION(in_type, nzdatabuf_type)(	     \
+		const ChunkIterator *chunk_iter, size_t *inner_midx_buf,     \
+		const in_type *in,					     \
+		IntAEAE *nzcoo_bufs, nzdatabuf_type *nzdata_buf)	     \
+{									     \
+	const H5DSetDescriptor *h5dset = chunk_iter->touched_chunks->h5dset; \
+	int ndim = h5dset->ndim;					     \
+	int do_fast_walk = _tchunk_is_fully_selected(ndim,		     \
+					&chunk_iter->h5dset_vp,		     \
+					&chunk_iter->mem_vp)		     \
+			   && ! _tchunk_is_truncated(h5dset,		     \
+					&chunk_iter->h5dset_vp);	     \
+	if (do_fast_walk) {						     \
+		while (1) {						     \
+			in_type val = *in;				     \
+			if (val != (in_type) 0) {			     \
+				if (nzdata_buf->_nelt >=		     \
+				    NZDATA_MAXLENGTH)			     \
+				{					     \
+					PRINT_TO_ERRMSG_BUF(		     \
+						"too many non-zero "	     \
+						"values to load");	     \
+					return -1;			     \
+				}					     \
+				nzdatabuf_type ## _fast_append(		     \
+						nzdata_buf, val);	     \
+				append_array_index_to_nzcoo_bufs(	     \
+						&chunk_iter->mem_vp,	     \
+						inner_midx_buf,		     \
+						nzcoo_bufs);		     \
+			}						     \
+			int inner_moved_along = next_midx(ndim,		     \
+						chunk_iter->mem_vp.dim,	     \
+						inner_midx_buf);	     \
+			if (inner_moved_along == ndim)			     \
+				break;					     \
+			in++;						     \
+		};							     \
+	} else {							     \
+		size_t in_offset;					     \
+		_init_in_offset(ndim,					     \
+				chunk_iter->touched_chunks->index,	     \
+				h5dset->h5chunkdim,			     \
+				&chunk_iter->mem_vp,			     \
+				&chunk_iter->h5dset_vp,			     \
+				&in_offset);				     \
+		while (1) {						     \
+			in_type val = in[in_offset];			     \
+			if (val != (in_type) 0) {			     \
+				if (nzdata_buf->_nelt >=		     \
+				    NZDATA_MAXLENGTH)			     \
+				{					     \
+					PRINT_TO_ERRMSG_BUF(		     \
+						"too many non-zero "	     \
+						"values to load");	     \
+					return -1;			     \
+				}					     \
+				nzdatabuf_type ## _fast_append(		     \
+						nzdata_buf, val);	     \
+				append_array_index_to_nzcoo_bufs(	     \
+						&chunk_iter->mem_vp,	     \
+						inner_midx_buf,		     \
+						nzcoo_bufs);		     \
+			}						     \
+			int inner_moved_along = next_midx(ndim,		     \
+						chunk_iter->mem_vp.dim,	     \
+						inner_midx_buf);	     \
+			if (inner_moved_along == ndim)			     \
+				break;					     \
+			update_in_offset(ndim,				     \
+					 chunk_iter->touched_chunks->index,  \
+					 h5dset->h5chunkdim,		     \
+					 &chunk_iter->mem_vp,		     \
+					 inner_midx_buf,		     \
+					 inner_moved_along,		     \
+					 &in_offset);			     \
+		};							     \
+	}								     \
+	return (long long int) nzdatabuf_type ## _get_nelt(nzdata_buf);	     \
 }
 
 /* copy_selected_XXX_chunk_data_to_IntAE_buf() functions: copy ints and
@@ -366,7 +366,7 @@ static int copy_selected_chunk_data_to_nzbufs(
 	//double dt;
 
 	//t0 = clock();
-	const H5DSetDescriptor *h5dset = chunk_iter->h5dset;
+	const H5DSetDescriptor *h5dset = chunk_iter->touched_chunks->h5dset;
 	if (h5dset->h5type->Rtype == STRSXP) {
 		//printf("- copying selected chunk character data ... ");
 		long long int nvals =
@@ -566,7 +566,7 @@ static int copy_selected_chunk_data_to_nzbufs(
 static int read_data_7(ChunkIterator *chunk_iter,
 		IntAEAE *nzcoo_bufs, void *nzdata_buf)
 {
-	const H5DSetDescriptor *h5dset = chunk_iter->h5dset;
+	const H5DSetDescriptor *h5dset = chunk_iter->touched_chunks->h5dset;
 	int ndim = h5dset->ndim;
 	size_t *inner_midx_buf = R_alloc0_size_t_array(ndim);
 
@@ -607,29 +607,42 @@ static int read_data_7(ChunkIterator *chunk_iter,
  * Return 'list(NULL, nzcoo, nzdata)' or R_NilValue if an error occured.
  */
 
-SEXP _h5mread_sparse(ChunkIterator *chunk_iter, const size_t *ans_dim)
+SEXP _h5mread_sparse(const TouchedChunks *touched_chunks,
+		     const size_t *ans_dim)
 {
-	const H5DSetDescriptor *h5dset = chunk_iter->h5dset;
+	ChunkIterator chunk_iter;
+	/* In the context of method 7, 'chunk_iter.mem_vp.h5off'
+	   and 'chunk_iter.mem_vp.h5dim' won't be used, only
+	   'chunk_iter.mem_vp.off' and 'chunk_iter.mem_vp.dim',
+	   so we set 'alloc_full_mem_vp' (last arg) to 0. */
+	int ret = _init_ChunkIterator(&chunk_iter, touched_chunks, 0);
+	if (ret < 0)
+		return R_NilValue;
+
+	const H5DSetDescriptor *h5dset = touched_chunks->h5dset;
 	int ndim = h5dset->ndim;
 	IntAEAE *nzcoo_bufs = new_IntAEAE(ndim, ndim);
 	void *nzdata_buf = new_nzdata_buf(h5dset->h5type->Rtype);
-	if (nzdata_buf == NULL)  /* should never happen */
+	if (nzdata_buf == NULL) {  /* should never happen */
+		_destroy_ChunkIterator(&chunk_iter);
 		return R_NilValue;
+	}
 
-	int ret = read_data_7(chunk_iter, nzcoo_bufs, nzdata_buf);
-	if (ret < 0)
+	ret = read_data_7(&chunk_iter, nzcoo_bufs, nzdata_buf);
+	if (ret < 0) {
+		_destroy_ChunkIterator(&chunk_iter);
 		return R_NilValue;
+	}
 
 	SEXP ans = PROTECT(NEW_LIST(3));
 	//clock_t t0 = clock();
 	ret = copy_nzcoo_and_nzdata_to_ans(h5dset->h5type->Rtype,
 					   nzcoo_bufs, nzdata_buf,
 					   ans);
-	UNPROTECT(1);
-	if (ret < 0)
-		return R_NilValue;
 	//double dt = (1.0 * clock() - t0) / CLOCKS_PER_SEC;
 	//printf("copy_nzcoo_and_nzdata_to_ans(): %2.3f s\n", dt);
-	return ans;
+	_destroy_ChunkIterator(&chunk_iter);
+	UNPROTECT(1);
+	return ret < 0 ? R_NilValue : ans;
 }
 

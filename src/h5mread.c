@@ -303,53 +303,35 @@ static SEXP h5mread(hid_t dset_id, SEXP starts, SEXP counts, int noreduce,
 
 		/* --- Methods 4, 5, 6 (counts=NULL, as.sparse=FALSE) --- */
 
-		/* In the context of methods 5 & 6, 'chunk_iter.mem_vp.h5off'
-		   and 'chunk_iter.mem_vp.h5dim' will be used, not just
-		   'chunk_iter.mem_vp.off' and 'chunk_iter.mem_vp.dim',
-		   so we set 'alloc_full_mem_vp' (last arg) to 1. */
-		ChunkIterator chunk_iter;
-		ret = _init_ChunkIterator(&chunk_iter, &h5dset, starts,
-					  ans_dim_buf, method != 4);
+		TouchedChunks touched_chunks;
+		ret = _init_TouchedChunks(&touched_chunks, &h5dset, starts,
+					  ans_dim_buf);
 		if (ret < 0)
 			goto done;
 		if (!as_vec) {
 			ret = set_ans_dim(ans_dim, ans_dim_buf, 1);
-			if (ret < 0) {
-				_destroy_ChunkIterator(&chunk_iter);
+			if (ret < 0)
 				goto done;
-			}
 		}
-		ans = _h5mread_index(&chunk_iter, method,
+		ans = _h5mread_index(&touched_chunks, method,
 				     use_H5Dread_chunk, ans_dim_buf);
-		PROTECT(ans);
-		_destroy_ChunkIterator(&chunk_iter);
-		UNPROTECT(1);
 
 	} else {
 
 		/* --- Method 7 (counts=NULL, as.sparse=TRUE) --- */
 
-		/* In the context of method 7, 'chunk_iter.mem_vp.h5off'
-		   and 'chunk_iter.mem_vp.h5dim' won't be used, only
-		   'chunk_iter.mem_vp.off' and 'chunk_iter.mem_vp.dim',
-		   so we set 'alloc_full_mem_vp' (last arg) to 0. */
-		ChunkIterator chunk_iter;
-		ret = _init_ChunkIterator(&chunk_iter, &h5dset, starts,
-					  ans_dim_buf, 0);
+		TouchedChunks touched_chunks;
+		ret = _init_TouchedChunks(&touched_chunks, &h5dset, starts,
+					  ans_dim_buf);
 		if (ret < 0)
 			goto done;
 		/* 'as_vec' ignored. */
 		ret = set_ans_dim(ans_dim, ans_dim_buf, 0);
-		if (ret < 0) {
-			_destroy_ChunkIterator(&chunk_iter);
+		if (ret < 0)
 			goto done;
-		}
 		/* Return 'list(NULL, nzcoo, nzdata)' or R_NilValue if
 		   an error occured. */
-		ans = _h5mread_sparse(&chunk_iter, ans_dim_buf);
-		PROTECT(ans);
-		_destroy_ChunkIterator(&chunk_iter);
-		UNPROTECT(1);
+		ans = _h5mread_sparse(&touched_chunks, ans_dim_buf);
 
 	}
 

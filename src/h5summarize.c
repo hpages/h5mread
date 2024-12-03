@@ -8,7 +8,7 @@
 #include "global_errmsg_buf.h"
 #include "uaselection.h"
 #include "h5mread_helpers.h"
-#include "ChunkIterator.h"
+#include "TouchedChunks.h"
 
 #include <string.h>  /* for strcmp */
 #include <limits.h>  /* for INT_MAX */
@@ -504,12 +504,17 @@ static SEXP h5summarize(const H5DSetDescriptor *h5dset, SEXP index,
 	size_t *inner_midx_buf  = R_alloc0_size_t_array(ndim);
 	int status = 0;
 
+	TouchedChunks touched_chunks;
+	int ret = _init_TouchedChunks(&touched_chunks, h5dset, index, NULL);
+	if (ret < 0)
+		return R_NilValue;
+
 	/* In the context of h5summarize(), we won't use
 	   'chunk_iter.mem_vp.h5off' or 'chunk_iter.mem_vp.h5dim', only
 	   'chunk_iter.mem_vp.off' and 'chunk_iter.mem_vp.dim', so we
 	   set 'alloc_full_mem_vp' (last arg) to 0. */
 	ChunkIterator chunk_iter;
-	int ret = _init_ChunkIterator(&chunk_iter, h5dset, index, NULL, 0);
+	ret = _init_ChunkIterator(&chunk_iter, &touched_chunks, 0);
 	if (ret < 0)
 		return R_NilValue;
 

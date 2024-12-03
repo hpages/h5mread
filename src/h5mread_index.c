@@ -7,7 +7,7 @@
 #include "global_errmsg_buf.h"
 #include "uaselection.h"
 #include "h5mread_helpers.h"
-#include "ChunkIterator.h"
+#include "TouchedChunks.h"
 
 #include <stdlib.h>  /* for malloc, free */
 #include <string.h>  /* for memcmp */
@@ -138,7 +138,7 @@ static long long int copy_selected_string_chunk_data_to_character_Rarray(
 		const void *in, size_t in_offset,
 		const size_t *Rarray_dim, SEXP Rarray, size_t Rarray_offset)
 {
-	const H5DSetDescriptor *h5dset = chunk_iter->h5dset;
+	const H5DSetDescriptor *h5dset = chunk_iter->touched_chunks->h5dset;
 	int ndim = h5dset->ndim;
 	long long int nvals = 0;
 	while (1) {
@@ -157,7 +157,7 @@ static long long int copy_selected_string_chunk_data_to_character_Rarray(
 		if (inner_moved_along == ndim)
 			break;
 		update_in_offset_and_out_offset(ndim,
-				chunk_iter->index,
+				chunk_iter->touched_chunks->index,
 				h5dset->h5chunkdim,
 				&chunk_iter->mem_vp,
 				inner_midx_buf,
@@ -168,32 +168,32 @@ static long long int copy_selected_string_chunk_data_to_character_Rarray(
 	return nvals;
 }
 
-#define	ARGS_AND_BODY_OF_COPY_FUNCTION(in_type, out_type)(		  \
-		const ChunkIterator *chunk_iter, size_t *inner_midx_buf,  \
-		const in_type *in, size_t in_offset,			  \
-		const size_t *out_dim, out_type *out, size_t out_offset)  \
-{									  \
-	const H5DSetDescriptor *h5dset = chunk_iter->h5dset;		  \
-	int ndim = h5dset->ndim;					  \
-	long long int nvals = 0;					  \
-	while (1) {							  \
-		out[out_offset] = in[in_offset];			  \
-		nvals++;						  \
-		int inner_moved_along = next_midx(ndim,			  \
-						  chunk_iter->mem_vp.dim, \
-						  inner_midx_buf);	  \
-		if (inner_moved_along == ndim)				  \
-			break;						  \
-		update_in_offset_and_out_offset(ndim,			  \
-				chunk_iter->index,			  \
-				h5dset->h5chunkdim,			  \
-				&chunk_iter->mem_vp,			  \
-				inner_midx_buf,				  \
-				inner_moved_along,			  \
-				out_dim,				  \
-				&in_offset, &out_offset);		  \
-	};								  \
-	return nvals;							  \
+#define	ARGS_AND_BODY_OF_COPY_FUNCTION(in_type, out_type)(		     \
+		const ChunkIterator *chunk_iter, size_t *inner_midx_buf,     \
+		const in_type *in, size_t in_offset,			     \
+		const size_t *out_dim, out_type *out, size_t out_offset)     \
+{									     \
+	const H5DSetDescriptor *h5dset = chunk_iter->touched_chunks->h5dset; \
+	int ndim = h5dset->ndim;					     \
+	long long int nvals = 0;					     \
+	while (1) {							     \
+		out[out_offset] = in[in_offset];			     \
+		nvals++;						     \
+		int inner_moved_along = next_midx(ndim,			     \
+						  chunk_iter->mem_vp.dim,    \
+						  inner_midx_buf);	     \
+		if (inner_moved_along == ndim)				     \
+			break;						     \
+		update_in_offset_and_out_offset(ndim,			     \
+				chunk_iter->touched_chunks->index,	     \
+				h5dset->h5chunkdim,			     \
+				&chunk_iter->mem_vp,			     \
+				inner_midx_buf,				     \
+				inner_moved_along,			     \
+				out_dim,				     \
+				&in_offset, &out_offset);		     \
+	};								     \
+	return nvals;							     \
 }
 
 /* copy_selected_XXX_chunk_data_to_int_array() functions: copy ints and
@@ -250,9 +250,10 @@ static long long int copy_selected_chunk_data_to_Rarray(
 		size_t *inner_midx_buf,
 		const size_t *Rarray_dim, SEXP Rarray)
 {
-	const H5DSetDescriptor *h5dset = chunk_iter->h5dset;
+	const H5DSetDescriptor *h5dset = chunk_iter->touched_chunks->h5dset;
 	size_t in_offset, out_offset;
-	init_in_offset_and_out_offset(h5dset->ndim, chunk_iter->index,
+	init_in_offset_and_out_offset(h5dset->ndim,
+			chunk_iter->touched_chunks->index,
 			Rarray_dim, &chunk_iter->mem_vp,
 			&chunk_iter->h5dset_vp, h5dset->h5chunkdim,
 			&in_offset, &out_offset);
@@ -400,7 +401,7 @@ static long long int copy_selected_chunk_data_to_Rarray(
  * chunk is fully selected.
  */
 
-static int read_data_4_5(ChunkIterator *chunk_iter,
+static int read_data_4_5(const TouchedChunks *touched_chunks,
 		const size_t *Rarray_dim, SEXP Rarray,
 		int method, int use_H5Dread_chunk)
 {
@@ -408,48 +409,62 @@ static int read_data_4_5(ChunkIterator *chunk_iter,
 		warning("using 'use.H5Dread_chunk=TRUE' is still "
 			"experimental, use at your own risk");
 
-	const H5DSetDescriptor *h5dset = chunk_iter->h5dset;
+	ChunkIterator chunk_iter;
+	/* In the context of method 5, 'chunk_iter.mem_vp.h5off'
+	   and 'chunk_iter.mem_vp.h5dim' will be used, not just
+	   'chunk_iter.mem_vp.off' and 'chunk_iter.mem_vp.dim',
+	   so we set 'alloc_full_mem_vp' (last arg) to 1. */
+	int ret = _init_ChunkIterator(&chunk_iter, touched_chunks, method == 5);
+	if (ret < 0)
+		return ret;
+
+	const H5DSetDescriptor *h5dset = touched_chunks->h5dset;
 	int ndim = h5dset->ndim;
 	size_t *inner_midx_buf = R_alloc0_size_t_array(ndim);
 
 	void *out = DATAPTR(Rarray);
-	if (out == NULL)
+	if (out == NULL) {
+		_destroy_ChunkIterator(&chunk_iter);
 		return -1;
+	}
 
 	hid_t out_space_id = _create_mem_space(ndim, Rarray_dim);
-	if (out_space_id < 0)
+	if (out_space_id < 0) {
+		_destroy_ChunkIterator(&chunk_iter);
 		return -1;
+	}
 
 	ChunkDataBuffer chunk_data_buf;
-	int ret = _init_ChunkDataBuffer(&chunk_data_buf, h5dset, 0);
+	ret = _init_ChunkDataBuffer(&chunk_data_buf, h5dset, 0);
 	if (ret < 0) {
 		H5Sclose(out_space_id);
+		_destroy_ChunkIterator(&chunk_iter);
 		return ret;
 	}
 	/* Walk over the chunks touched by the user-supplied array selection. */
 	while ((ret = _next_chunk(chunk_iter))) {
 		if (ret < 0)
 			break;
-		//_print_tchunk_info(chunk_iter);
+		//_print_tchunk_info(&chunk_iter);
 		int direct_load = method == 5 && _tchunk_is_fully_selected(ndim,
-							&chunk_iter->h5dset_vp,
-							&chunk_iter->mem_vp);
+							&chunk_iter.h5dset_vp,
+							&chunk_iter.mem_vp);
 		if (direct_load) {
 			/* Load the chunk **directly** into 'Rarray' (no
 			   intermediate buffer). */
 			ret = _read_H5Viewport(h5dset,
-				&chunk_iter->h5dset_vp,
+				&chunk_iter.h5dset_vp,
 				h5dset->h5type->native_type_id_for_Rtype,
 				out_space_id, out,
-				&chunk_iter->mem_vp);
+				&chunk_iter.mem_vp);
 		} else {
 			/* Load the **entire** chunk to an intermediate
 			   buffer then copy the user-selected chunk data
 			   from the intermediate buffer to 'Rarray'. */
 			//clock_t t0 = clock();
-			ret = _load_chunk(chunk_iter,
-					&chunk_data_buf,
-					use_H5Dread_chunk);
+			ret = _load_chunk(&chunk_iter,
+					  &chunk_data_buf,
+					  use_H5Dread_chunk);
 			if (ret < 0)
 				break;
 			//double dt = (1.0 * clock() - t0) * 1000.0 / CLOCKS_PER_SEC;
@@ -457,7 +472,7 @@ static int read_data_4_5(ChunkIterator *chunk_iter,
 
 			long long int nvals =
 				copy_selected_chunk_data_to_Rarray(
-						chunk_iter,
+						&chunk_iter,
 						&chunk_data_buf,
 						inner_midx_buf,
 						Rarray_dim, Rarray);
@@ -471,6 +486,7 @@ static int read_data_4_5(ChunkIterator *chunk_iter,
 	}
 	_destroy_ChunkDataBuffer(&chunk_data_buf);
 	H5Sclose(out_space_id);
+	_destroy_ChunkIterator(&chunk_iter);
 	return ret;
 }
 
@@ -617,12 +633,12 @@ static int direct_load_selected_chunk_data(
 		size_t *inner_nchip_buf,
 		hid_t out_space_id, void *out)
 {
-	const H5DSetDescriptor *h5dset = chunk_iter->h5dset;
+	const H5DSetDescriptor *h5dset = chunk_iter->touched_chunks->h5dset;
 	update_inner_breakpoints(h5dset->ndim, chunk_iter->moved_along,
-			chunk_iter->index, &chunk_iter->mem_vp,
+			chunk_iter->touched_chunks->index, &chunk_iter->mem_vp,
 			inner_breakpoint_bufs, inner_nchip_buf);
 	int ret = select_intersection_of_chips_with_chunk(
-			h5dset, chunk_iter->index,
+			h5dset, chunk_iter->touched_chunks->index,
 			&chunk_iter->mem_vp, &chunk_iter->h5dset_vp,
 			inner_breakpoint_bufs, inner_nchip_buf,
 			inner_midx_buf, inner_vp);
@@ -634,36 +650,50 @@ static int direct_load_selected_chunk_data(
 				&chunk_iter->mem_vp);
 }
 
-static int read_data_6(ChunkIterator *chunk_iter,
+static int read_data_6(const TouchedChunks *touched_chunks,
 		const size_t *Rarray_dim, SEXP Rarray)
 {
-	const H5DSetDescriptor *h5dset = chunk_iter->h5dset;
+	ChunkIterator chunk_iter;
+	/* In the context of method 6, 'chunk_iter.mem_vp.h5off'
+	   and 'chunk_iter.mem_vp.h5dim' will be used, not just
+	   'chunk_iter.mem_vp.off' and 'chunk_iter.mem_vp.dim',
+	   so we set 'alloc_full_mem_vp' (last arg) to 1. */
+	int ret = _init_ChunkIterator(&chunk_iter, touched_chunks, 1);
+	if (ret < 0)
+		return ret;
+
+	const H5DSetDescriptor *h5dset = touched_chunks->h5dset;
 	int ndim = h5dset->ndim;
 	size_t *inner_midx_buf  = R_alloc0_size_t_array(ndim);
 	size_t *inner_nchip_buf = R_alloc0_size_t_array(ndim);
 	LLongAEAE *inner_breakpoint_bufs = new_LLongAEAE(ndim, ndim);
 
 	void *out = DATAPTR(Rarray);
-	if (out == NULL)
+	if (out == NULL) {
+		_destroy_ChunkIterator(&chunk_iter);
 		return -1;
+	}
 
 	hid_t out_space_id = _create_mem_space(ndim, Rarray_dim);
-	if (out_space_id < 0)
+	if (out_space_id < 0) {
+		_destroy_ChunkIterator(&chunk_iter);
 		return -1;
+	}
 
 	H5Viewport inner_vp;
-	int ret = _alloc_H5Viewport(&inner_vp, ndim, ALLOC_H5OFF_AND_H5DIM);
+	ret = _alloc_H5Viewport(&inner_vp, ndim, ALLOC_H5OFF_AND_H5DIM);
 	if (ret < 0) {
 		H5Sclose(out_space_id);
+		_destroy_ChunkIterator(&chunk_iter);
 		return ret;
 	}
 
 	/* Walk over the chunks touched by the user-supplied array selection. */
-	while ((ret = _next_chunk(chunk_iter))) {
+	while ((ret = _next_chunk(&chunk_iter))) {
 		if (ret < 0)
 			break;
 		ret = direct_load_selected_chunk_data(
-			chunk_iter,
+			&chunk_iter,
 			inner_midx_buf,
 			&inner_vp,
 			inner_breakpoint_bufs, inner_nchip_buf,
@@ -673,6 +703,7 @@ static int read_data_6(ChunkIterator *chunk_iter,
 	}
 	_free_H5Viewport(&inner_vp);
 	H5Sclose(out_space_id);
+	_destroy_ChunkIterator(&chunk_iter);
 	return ret;
 }
 
@@ -684,26 +715,24 @@ static int read_data_6(ChunkIterator *chunk_iter,
  * Return an ordinary array or R_NilValue if an error occured.
  */
 
-SEXP _h5mread_index(ChunkIterator *chunk_iter, int method,
-		int use_H5Dread_chunk, const size_t *ans_dim)
+SEXP _h5mread_index(const TouchedChunks *touched_chunks,
+		    int method, int use_H5Dread_chunk, const size_t *ans_dim)
 {
-	const H5DSetDescriptor *h5dset = chunk_iter->h5dset;
+	const H5DSetDescriptor *h5dset = touched_chunks->h5dset;
 	int ndim = h5dset->ndim;
 	R_xlen_t ans_len = 1;
 	for (int along = 0; along < ndim; along++)
 		ans_len *= ans_dim[along];
 	SEXP ans = PROTECT(allocVector(h5dset->h5type->Rtype, ans_len));
-
 	int ret;
 	if (method <= 5) {
 		/* methods 4 and 5 */
-		ret = read_data_4_5(chunk_iter, ans_dim, ans,
+		ret = read_data_4_5(touched_chunks, ans_dim, ans,
 				    method, use_H5Dread_chunk);
 	} else {
 		/* method 6 */
-		ret = read_data_6(chunk_iter, ans_dim, ans);
+		ret = read_data_6(touched_chunks, ans_dim, ans);
 	}
-
 	UNPROTECT(1);
 	return ret < 0 ? R_NilValue : ans;
 }

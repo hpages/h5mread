@@ -2,7 +2,7 @@
  *               Iterating over the chunks of an HDF5 dataset               *
  *                            Author: H. Pag\`es                            *
  ****************************************************************************/
-#include "ChunkIterator.h"
+#include "TouchedChunks.h"
 
 #include "global_errmsg_buf.h"
 #include "uaselection.h"
@@ -348,6 +348,39 @@ static int read_h5chunk(hid_t dset_id,
  * Exported functions
  */
 
+int _init_TouchedChunks(TouchedChunks *touched_chunks,
+		const H5DSetDescriptor *h5dset, SEXP index,
+		size_t *selection_dim)
+{
+	if (h5dset->h5chunkdim == NULL) {
+		PRINT_TO_ERRMSG_BUF("'h5dset->h5chunkdim' is NULL");
+		return -1;
+	}
+
+	/* Set struct members 'h5dset' and 'index'. */
+	touched_chunks->h5dset = h5dset;
+	touched_chunks->index = index;
+
+	/* Set struct members 'breakpoint_bufs' and 'tchunkidx_bufs'.
+	   Also populate 'selection_dim' if not set to NULL. */
+	int ndim = h5dset->ndim;
+	LLongAEAE *breakpoint_bufs = new_LLongAEAE(ndim, ndim);
+	LLongAEAE *tchunkidx_bufs  = new_LLongAEAE(ndim, ndim);
+	int ret = map_starts_to_h5chunks(h5dset, index, selection_dim,
+					 breakpoint_bufs, tchunkidx_bufs);
+	if (ret < 0)
+		return -1;
+	touched_chunks->breakpoint_bufs = breakpoint_bufs;
+	touched_chunks->tchunkidx_bufs  = tchunkidx_bufs;
+
+	/* Set struct members 'num_tchunks' and 'total_num_tchunks'. */
+	touched_chunks->num_tchunks = R_alloc0_size_t_array(ndim);
+	touched_chunks->total_num_tchunks = set_num_tchunks(h5dset, index,
+						tchunkidx_bufs,
+						touched_chunks->num_tchunks);
+	return 0;
+}
+
 void _destroy_ChunkIterator(ChunkIterator *chunk_iter)
 {
 	if (chunk_iter->h5dset_vp.h5off != NULL)
@@ -357,41 +390,19 @@ void _destroy_ChunkIterator(ChunkIterator *chunk_iter)
 }
 
 int _init_ChunkIterator(ChunkIterator *chunk_iter,
-		const H5DSetDescriptor *h5dset, SEXP index,
-		size_t *selection_dim,
-		int alloc_full_mem_vp)
+			const TouchedChunks *touched_chunks,
+			int alloc_full_mem_vp)
 {
-	if (h5dset->h5chunkdim == NULL) {
-		PRINT_TO_ERRMSG_BUF("'h5dset->h5chunkdim' is NULL");
-		return -1;
-	}
-
-	chunk_iter->h5dset = h5dset;
-	chunk_iter->index = index;
-	int ndim = h5dset->ndim;
-
-	/* Initialize ChunkIterator struct members that control
-	   what _destroy_ChunkIterator() needs to free or close. */
+	/* Set this first because it controls what _destroy_ChunkIterator()
+	   needs to free or close. */
 	chunk_iter->h5dset_vp.h5off = NULL;
 
-	/* Set struct members 'breakpoint_bufs' and 'tchunkidx_bufs'.
-	   Also populate 'selection_dim' if not set to NULL. */
-	chunk_iter->breakpoint_bufs = new_LLongAEAE(ndim, ndim);
-	chunk_iter->tchunkidx_bufs  = new_LLongAEAE(ndim, ndim);
-	int ret = map_starts_to_h5chunks(h5dset, index, selection_dim,
-					 chunk_iter->breakpoint_bufs,
-					 chunk_iter->tchunkidx_bufs);
-	if (ret < 0)
-		goto on_error;
-
-	/* Set struct members 'num_tchunks' and 'total_num_tchunks'. */
-	chunk_iter->num_tchunks = R_alloc0_size_t_array(ndim);
-	chunk_iter->total_num_tchunks = set_num_tchunks(h5dset, index,
-						chunk_iter->tchunkidx_bufs,
-						chunk_iter->num_tchunks);
+	/* Set struct member 'touched_chunks'. */
+	chunk_iter->touched_chunks = touched_chunks;
 
 	/* Allocate struct members 'h5dset_vp' and 'mem_vp'. */
-	ret = alloc_h5dset_vp_mem_vp(ndim,
+	int ndim = touched_chunks->h5dset->ndim;
+	int ret = alloc_h5dset_vp_mem_vp(ndim,
 				&chunk_iter->h5dset_vp,
 				&chunk_iter->mem_vp,
 				alloc_full_mem_vp ? ALLOC_ALL_FIELDS
@@ -427,44 +438,47 @@ int _init_ChunkIterator(ChunkIterator *chunk_iter,
  */
 int _next_chunk(ChunkIterator *chunk_iter)
 {
+	const TouchedChunks *touched_chunks = chunk_iter->touched_chunks;
 	chunk_iter->tchunk_rank++;
-	if (chunk_iter->tchunk_rank == chunk_iter->total_num_tchunks)
+	if (chunk_iter->tchunk_rank == touched_chunks->total_num_tchunks)
 		return 0;
-	const H5DSetDescriptor *h5dset = chunk_iter->h5dset;
+	const H5DSetDescriptor *h5dset = touched_chunks->h5dset;
 	chunk_iter->moved_along = chunk_iter->tchunk_rank == 0 ?
 					h5dset->ndim :
 					next_midx(h5dset->ndim,
-						chunk_iter->num_tchunks,
-						chunk_iter->tchunk_midx_buf);
+						  touched_chunks->num_tchunks,
+						  chunk_iter->tchunk_midx_buf);
 	update_h5dset_vp_mem_vp(h5dset,
 			chunk_iter->tchunk_midx_buf,
 			chunk_iter->moved_along,
-			chunk_iter->index,
-			chunk_iter->breakpoint_bufs, chunk_iter->tchunkidx_bufs,
+			touched_chunks->index,
+			touched_chunks->breakpoint_bufs,
+			touched_chunks->tchunkidx_bufs,
 			&chunk_iter->h5dset_vp, &chunk_iter->mem_vp);
 	return 1;
 }
 
 void _print_tchunk_info(const ChunkIterator *chunk_iter)
 {
+	const TouchedChunks *touched_chunks = chunk_iter->touched_chunks;
 	Rprintf("processing chunk %lld/%lld: [",
-		chunk_iter->tchunk_rank + 1, chunk_iter->total_num_tchunks);
-	int ndim = chunk_iter->h5dset->ndim;
+		chunk_iter->tchunk_rank + 1, touched_chunks->total_num_tchunks);
+	int ndim = touched_chunks->h5dset->ndim;
 	for (int along = 0; along < ndim; along++) {
 		size_t i = chunk_iter->tchunk_midx_buf[along] + 1;
 		if (along != 0)
 			Rprintf(", ");
-		Rprintf("%lu/%lu", i, chunk_iter->num_tchunks[along]);
+		Rprintf("%lu/%lu", i, touched_chunks->num_tchunks[along]);
 	}
 	Rprintf("] -- <<");
 	int along, h5along;
 	for (along = 0, h5along = ndim - 1; along < ndim; along++, h5along--) {
 		size_t i = chunk_iter->tchunk_midx_buf[along];
-		SEXP start = GET_LIST_ELT(chunk_iter->index, along);
+		SEXP start = GET_LIST_ELT(touched_chunks->index, along);
 		long long int tchunkidx;
 		if (start != R_NilValue) {
 			const LLongAEAE *tchunkidx_bufs =
-						chunk_iter->tchunkidx_bufs;
+						touched_chunks->tchunkidx_bufs;
 			tchunkidx = tchunkidx_bufs->elts[along]->elts[i];
 		} else {
 			tchunkidx = (long long int) i;
@@ -595,7 +609,7 @@ int _load_chunk(const ChunkIterator *chunk_iter,
 			return -1;
 		}
 	}
-	h5dset = chunk_iter->h5dset;
+	h5dset = chunk_iter->touched_chunks->h5dset;
 	if (!use_H5Dread_chunk) {
 		if (chunk_data_buf->data_space_id == -1) {
 			data_space_id = H5Screate_simple(h5dset->ndim,

@@ -1,11 +1,11 @@
 #ifndef _H5MREAD_INDEX_H_
 #define _H5MREAD_INDEX_H_
 
-#include "ChunkIterator.h"
+#include "TouchedChunks.h"
 #include <Rdefines.h>
 
 SEXP _h5mread_index(
-	ChunkIterator *chunk_iter,
+	const TouchedChunks *touched_chunks,
 	int method,
 	int use_H5Dread_chunk,
 	const size_t *ans_dim
