@@ -303,9 +303,9 @@ static SEXP h5mread(hid_t dset_id, SEXP starts, SEXP counts, int noreduce,
 
 		/* --- Methods 4, 5, 6 (counts=NULL, as.sparse=FALSE) --- */
 
-		TouchedChunks touched_chunks;
-		ret = _init_TouchedChunks(&touched_chunks, &h5dset, starts,
-					  ans_dim_buf);
+		AllTChunks all_tchunks;
+		ret = _init_AllTChunks(&all_tchunks, &h5dset, starts,
+					     ans_dim_buf);
 		if (ret < 0)
 			goto done;
 		if (!as_vec) {
@@ -313,16 +313,16 @@ static SEXP h5mread(hid_t dset_id, SEXP starts, SEXP counts, int noreduce,
 			if (ret < 0)
 				goto done;
 		}
-		ans = _h5mread_index(&touched_chunks, method,
+		ans = _h5mread_index(&all_tchunks, method,
 				     use_H5Dread_chunk, ans_dim_buf);
 
 	} else {
 
 		/* --- Method 7 (counts=NULL, as.sparse=TRUE) --- */
 
-		TouchedChunks touched_chunks;
-		ret = _init_TouchedChunks(&touched_chunks, &h5dset, starts,
-					  ans_dim_buf);
+		AllTChunks all_tchunks;
+		ret = _init_AllTChunks(&all_tchunks, &h5dset, starts,
+				       ans_dim_buf);
 		if (ret < 0)
 			goto done;
 		/* 'as_vec' ignored. */
@@ -331,7 +331,7 @@ static SEXP h5mread(hid_t dset_id, SEXP starts, SEXP counts, int noreduce,
 			goto done;
 		/* Return 'list(NULL, nzcoo, nzdata)' or R_NilValue if
 		   an error occured. */
-		ans = _h5mread_sparse(&touched_chunks, ans_dim_buf);
+		ans = _h5mread_sparse(&all_tchunks, ans_dim_buf);
 
 	}
 

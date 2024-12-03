@@ -20,7 +20,7 @@
 
 static void init_in_offset_and_out_offset(int ndim, SEXP index,
 			const size_t *out_dim, const H5Viewport *out_vp,
-			const H5Viewport *h5dset_vp,
+			const H5Viewport *h5chunk_vp,
 			const hsize_t *h5chunkdim,
 			size_t *in_offset, size_t *out_offset)
 {
@@ -32,8 +32,8 @@ static void init_in_offset_and_out_offset(int ndim, SEXP index,
 		size_t i = out_vp->off[along];
 		SEXP start = GET_LIST_ELT(index, along);
 		if (start != R_NilValue)
-			in_off += get_trusted_elt(start, (R_xlen_t) i) - 1 -
-				  h5dset_vp->h5off[h5along];
+			in_off += get_trusted_elt(start, (R_xlen_t) i) -
+				  1 - h5chunk_vp->h5off[h5along];
 		out_off += i;
 	}
 	*in_offset = in_off;
@@ -134,32 +134,34 @@ static inline void copy_string_to_character_Rarray(
 }
 
 static long long int copy_selected_string_chunk_data_to_character_Rarray(
-		const ChunkIterator *chunk_iter, size_t *inner_midx_buf,
+		const AllTChunks *all_tchunks,
+		const TChunkViewports *tchunk_vps,
+		size_t *inner_midx_buf,
 		const void *in, size_t in_offset,
 		const size_t *Rarray_dim, SEXP Rarray, size_t Rarray_offset)
 {
-	const H5DSetDescriptor *h5dset = chunk_iter->touched_chunks->h5dset;
+	const H5DSetDescriptor *h5dset = all_tchunks->h5dset;
 	int ndim = h5dset->ndim;
 	long long int nvals = 0;
 	while (1) {
 		if (h5dset->h5type->is_variable_str)
 			copy_vlen_string_to_character_Rarray(h5dset,
-						in, in_offset,
-						Rarray, Rarray_offset);
+					in, in_offset,
+					Rarray, Rarray_offset);
 		else
 			copy_string_to_character_Rarray(h5dset,
-						in, in_offset,
-						Rarray, Rarray_offset);
+					in, in_offset,
+					Rarray, Rarray_offset);
 		nvals++;
 		int inner_moved_along = next_midx(ndim,
-						chunk_iter->mem_vp.dim,
-						inner_midx_buf);
+					tchunk_vps->mem_vp.dim,
+					inner_midx_buf);
 		if (inner_moved_along == ndim)
 			break;
 		update_in_offset_and_out_offset(ndim,
-				chunk_iter->touched_chunks->index,
+				all_tchunks->index,
 				h5dset->h5chunkdim,
-				&chunk_iter->mem_vp,
+				&tchunk_vps->mem_vp,
 				inner_midx_buf,
 				inner_moved_along,
 				Rarray_dim,
@@ -168,32 +170,34 @@ static long long int copy_selected_string_chunk_data_to_character_Rarray(
 	return nvals;
 }
 
-#define	ARGS_AND_BODY_OF_COPY_FUNCTION(in_type, out_type)(		     \
-		const ChunkIterator *chunk_iter, size_t *inner_midx_buf,     \
-		const in_type *in, size_t in_offset,			     \
-		const size_t *out_dim, out_type *out, size_t out_offset)     \
-{									     \
-	const H5DSetDescriptor *h5dset = chunk_iter->touched_chunks->h5dset; \
-	int ndim = h5dset->ndim;					     \
-	long long int nvals = 0;					     \
-	while (1) {							     \
-		out[out_offset] = in[in_offset];			     \
-		nvals++;						     \
-		int inner_moved_along = next_midx(ndim,			     \
-						  chunk_iter->mem_vp.dim,    \
-						  inner_midx_buf);	     \
-		if (inner_moved_along == ndim)				     \
-			break;						     \
-		update_in_offset_and_out_offset(ndim,			     \
-				chunk_iter->touched_chunks->index,	     \
-				h5dset->h5chunkdim,			     \
-				&chunk_iter->mem_vp,			     \
-				inner_midx_buf,				     \
-				inner_moved_along,			     \
-				out_dim,				     \
-				&in_offset, &out_offset);		     \
-	};								     \
-	return nvals;							     \
+#define	ARGS_AND_BODY_OF_COPY_FUNCTION(in_type, out_type)(		 \
+		const AllTChunks *all_tchunks,				 \
+		const TChunkViewports *tchunk_vps,			 \
+		size_t *inner_midx_buf,					 \
+		const in_type *in, size_t in_offset,			 \
+		const size_t *out_dim, out_type *out, size_t out_offset) \
+{									 \
+	const H5DSetDescriptor *h5dset = all_tchunks->h5dset;		 \
+	int ndim = h5dset->ndim;					 \
+	long long int nvals = 0;					 \
+	while (1) {							 \
+		out[out_offset] = in[in_offset];			 \
+		nvals++;						 \
+		int inner_moved_along = next_midx(ndim,			 \
+					tchunk_vps->mem_vp.dim,		 \
+					inner_midx_buf);		 \
+		if (inner_moved_along == ndim)				 \
+			break;						 \
+		update_in_offset_and_out_offset(ndim,			 \
+				all_tchunks->index,			 \
+				h5dset->h5chunkdim,			 \
+				&tchunk_vps->mem_vp,			 \
+				inner_midx_buf,				 \
+				inner_moved_along,			 \
+				out_dim,				 \
+				&in_offset, &out_offset);		 \
+	};								 \
+	return nvals;							 \
 }
 
 /* copy_selected_XXX_chunk_data_to_int_array() functions: copy ints and
@@ -245,22 +249,24 @@ static long long int copy_selected_uchar_chunk_data_to_uchar_array
 	ARGS_AND_BODY_OF_COPY_FUNCTION(unsigned char, unsigned char)
 
 static long long int copy_selected_chunk_data_to_Rarray(
-		const ChunkIterator *chunk_iter,
-		ChunkDataBuffer *chunk_data_buf,
+		const AllTChunks *all_tchunks,
+		const TChunkViewports *tchunk_vps,
 		size_t *inner_midx_buf,
+		ChunkDataBuffer *chunk_data_buf,
 		const size_t *Rarray_dim, SEXP Rarray)
 {
-	const H5DSetDescriptor *h5dset = chunk_iter->touched_chunks->h5dset;
+	const H5DSetDescriptor *h5dset = all_tchunks->h5dset;
 	size_t in_offset, out_offset;
 	init_in_offset_and_out_offset(h5dset->ndim,
-			chunk_iter->touched_chunks->index,
-			Rarray_dim, &chunk_iter->mem_vp,
-			&chunk_iter->h5dset_vp, h5dset->h5chunkdim,
+			all_tchunks->index,
+			Rarray_dim, &tchunk_vps->mem_vp,
+			&tchunk_vps->h5chunk_vp, h5dset->h5chunkdim,
 			&in_offset, &out_offset);
 	SEXPTYPE Rtype = h5dset->h5type->Rtype;
 	if (Rtype == STRSXP)
 		return copy_selected_string_chunk_data_to_character_Rarray(
-					chunk_iter, inner_midx_buf,
+					all_tchunks, tchunk_vps,
+					inner_midx_buf,
 					chunk_data_buf->data, in_offset,
 					Rarray_dim, Rarray, out_offset);
 	int copy_without_type_casting =
@@ -271,32 +277,38 @@ static long long int copy_selected_chunk_data_to_Rarray(
 		int *out = Rtype == INTSXP ? INTEGER(Rarray) : LOGICAL(Rarray);
 		if (copy_without_type_casting)
 			return copy_selected_int_chunk_data_to_int_array(
-					chunk_iter, inner_midx_buf,
+					all_tchunks, tchunk_vps,
+					inner_midx_buf,
 					chunk_data_buf->data, in_offset,
 					Rarray_dim, out, out_offset);
 		if (chunk_data_buf->data_type_id == H5T_NATIVE_CHAR)
 			return copy_selected_char_chunk_data_to_int_array(
-					chunk_iter, inner_midx_buf,
+					all_tchunks, tchunk_vps,
+					inner_midx_buf,
 					chunk_data_buf->data, in_offset,
 					Rarray_dim, out, out_offset);
 		if (chunk_data_buf->data_type_id == H5T_NATIVE_SCHAR)
 			return copy_selected_schar_chunk_data_to_int_array(
-					chunk_iter, inner_midx_buf,
+					all_tchunks, tchunk_vps,
+					inner_midx_buf,
 					chunk_data_buf->data, in_offset,
 					Rarray_dim, out, out_offset);
 		if (chunk_data_buf->data_type_id == H5T_NATIVE_UCHAR)
 			return copy_selected_uchar_chunk_data_to_int_array(
-					chunk_iter, inner_midx_buf,
+					all_tchunks, tchunk_vps,
+					inner_midx_buf,
 					chunk_data_buf->data, in_offset,
 					Rarray_dim, out, out_offset);
 		if (chunk_data_buf->data_type_id == H5T_NATIVE_SHORT)
 			return copy_selected_short_chunk_data_to_int_array(
-					chunk_iter, inner_midx_buf,
+					all_tchunks, tchunk_vps,
+					inner_midx_buf,
 					chunk_data_buf->data, in_offset,
 					Rarray_dim, out, out_offset);
 		if (chunk_data_buf->data_type_id == H5T_NATIVE_USHORT)
 			return copy_selected_ushort_chunk_data_to_int_array(
-					chunk_iter, inner_midx_buf,
+					all_tchunks, tchunk_vps,
+					inner_midx_buf,
 					chunk_data_buf->data, in_offset,
 					Rarray_dim, out, out_offset);
 		break;
@@ -305,67 +317,80 @@ static long long int copy_selected_chunk_data_to_Rarray(
 		double *out = REAL(Rarray);
 		if (copy_without_type_casting)
 			return copy_selected_double_chunk_data_to_double_array(
-					chunk_iter, inner_midx_buf,
+					all_tchunks, tchunk_vps,
+					inner_midx_buf,
 					chunk_data_buf->data, in_offset,
 					Rarray_dim, out, out_offset);
 		if (chunk_data_buf->data_type_id == H5T_NATIVE_CHAR)
 			return copy_selected_char_chunk_data_to_double_array(
-					chunk_iter, inner_midx_buf,
+					all_tchunks, tchunk_vps,
+					inner_midx_buf,
 					chunk_data_buf->data, in_offset,
 					Rarray_dim, out, out_offset);
 		if (chunk_data_buf->data_type_id == H5T_NATIVE_SCHAR)
 			return copy_selected_schar_chunk_data_to_double_array(
-					chunk_iter, inner_midx_buf,
+					all_tchunks, tchunk_vps,
+					inner_midx_buf,
 					chunk_data_buf->data, in_offset,
 					Rarray_dim, out, out_offset);
 		if (chunk_data_buf->data_type_id == H5T_NATIVE_UCHAR)
 			return copy_selected_uchar_chunk_data_to_double_array(
-					chunk_iter, inner_midx_buf,
+					all_tchunks, tchunk_vps,
+					inner_midx_buf,
 					chunk_data_buf->data, in_offset,
 					Rarray_dim, out, out_offset);
 		if (chunk_data_buf->data_type_id == H5T_NATIVE_SHORT)
 			return copy_selected_short_chunk_data_to_double_array(
-					chunk_iter, inner_midx_buf,
+					all_tchunks, tchunk_vps,
+					inner_midx_buf,
 					chunk_data_buf->data, in_offset,
 					Rarray_dim, out, out_offset);
 		if (chunk_data_buf->data_type_id == H5T_NATIVE_USHORT)
 			return copy_selected_ushort_chunk_data_to_double_array(
-					chunk_iter, inner_midx_buf,
+					all_tchunks, tchunk_vps,
+					inner_midx_buf,
 					chunk_data_buf->data, in_offset,
 					Rarray_dim, out, out_offset);
 		if (chunk_data_buf->data_type_id == H5T_NATIVE_INT)
 			return copy_selected_int_chunk_data_to_double_array(
-					chunk_iter, inner_midx_buf,
+					all_tchunks, tchunk_vps,
+					inner_midx_buf,
 					chunk_data_buf->data, in_offset,
 					Rarray_dim, out, out_offset);
 		if (chunk_data_buf->data_type_id == H5T_NATIVE_UINT)
 			return copy_selected_uint_chunk_data_to_double_array(
-					chunk_iter, inner_midx_buf,
+					all_tchunks, tchunk_vps,
+					inner_midx_buf,
 					chunk_data_buf->data, in_offset,
 					Rarray_dim, out, out_offset);
 		if (chunk_data_buf->data_type_id == H5T_NATIVE_LONG)
 			return copy_selected_long_chunk_data_to_double_array(
-					chunk_iter, inner_midx_buf,
+					all_tchunks, tchunk_vps,
+					inner_midx_buf,
 					chunk_data_buf->data, in_offset,
 					Rarray_dim, out, out_offset);
 		if (chunk_data_buf->data_type_id == H5T_NATIVE_ULONG)
 			return copy_selected_ulong_chunk_data_to_double_array(
-					chunk_iter, inner_midx_buf,
+					all_tchunks, tchunk_vps,
+					inner_midx_buf,
 					chunk_data_buf->data, in_offset,
 					Rarray_dim, out, out_offset);
 		if (chunk_data_buf->data_type_id == H5T_NATIVE_LLONG)
 			return copy_selected_llong_chunk_data_to_double_array(
-					chunk_iter, inner_midx_buf,
+					all_tchunks, tchunk_vps,
+					inner_midx_buf,
 					chunk_data_buf->data, in_offset,
 					Rarray_dim, out, out_offset);
 		if (chunk_data_buf->data_type_id == H5T_NATIVE_ULLONG)
 			return copy_selected_ullong_chunk_data_to_double_array(
-					chunk_iter, inner_midx_buf,
+					all_tchunks, tchunk_vps,
+					inner_midx_buf,
 					chunk_data_buf->data, in_offset,
 					Rarray_dim, out, out_offset);
 		if (chunk_data_buf->data_type_id == H5T_NATIVE_FLOAT)
 			return copy_selected_float_chunk_data_to_double_array(
-					chunk_iter, inner_midx_buf,
+					all_tchunks, tchunk_vps,
+					inner_midx_buf,
 					chunk_data_buf->data, in_offset,
 					Rarray_dim, out, out_offset);
 		break;
@@ -374,7 +399,8 @@ static long long int copy_selected_chunk_data_to_Rarray(
 		Rbyte *out = RAW(Rarray);
 		if (copy_without_type_casting)
 			return copy_selected_uchar_chunk_data_to_uchar_array(
-					chunk_iter, inner_midx_buf,
+					all_tchunks, tchunk_vps,
+					inner_midx_buf,
 					chunk_data_buf->data, in_offset,
 					Rarray_dim, out, out_offset);
 		break;
@@ -401,7 +427,57 @@ static long long int copy_selected_chunk_data_to_Rarray(
  * chunk is fully selected.
  */
 
-static int read_data_4_5(const TouchedChunks *touched_chunks,
+static int read_chunk_data_4_5(const H5DSetDescriptor *h5dset,
+		const AllTChunks *all_tchunks,
+		const TChunkViewports *tchunk_vps,
+		hid_t out_space_id,
+		size_t *inner_midx_buf,
+		ChunkDataBuffer *chunk_data_buf,
+		const size_t *Rarray_dim, SEXP Rarray,
+		int method, int use_H5Dread_chunk)
+{
+	void *out = DATAPTR(Rarray);
+	if (out == NULL)
+		return -1;
+
+	int direct_load = method == 5 &&
+			  _tchunk_is_fully_selected(h5dset->ndim, tchunk_vps);
+	if (direct_load) {
+		/* Load the chunk **directly** into 'Rarray' (no
+		   intermediate buffer). */
+		return _read_H5Viewport(h5dset,
+				&tchunk_vps->h5chunk_vp,
+				h5dset->h5type->native_type_id_for_Rtype,
+				out_space_id, out,
+				&tchunk_vps->mem_vp);
+	}
+
+	/* Load the **entire** chunk to an intermediate
+	   buffer then copy the user-selected chunk data
+	   from the intermediate buffer to 'Rarray'. */
+	//clock_t t0 = clock();
+	int ret = _load_chunk(h5dset, tchunk_vps,
+			      chunk_data_buf, use_H5Dread_chunk);
+	if (ret < 0)
+		return ret;
+
+	//double dt = (1.0 * clock() - t0) * 1000.0 / CLOCKS_PER_SEC;
+	//printf("- load chunk: %3.3f ms\n", dt);
+
+	long long int nvals = copy_selected_chunk_data_to_Rarray(
+					all_tchunks, tchunk_vps,
+					inner_midx_buf,
+					chunk_data_buf,
+					Rarray_dim, Rarray);
+	if (nvals < 0)
+		return (int) nvals;
+
+	if (h5dset->h5type->is_variable_str)
+		_reclaim_vlen_bufs(chunk_data_buf);
+	return 0;
+}
+
+static int read_data_4_5(const AllTChunks *all_tchunks,
 		const size_t *Rarray_dim, SEXP Rarray,
 		int method, int use_H5Dread_chunk)
 {
@@ -409,84 +485,90 @@ static int read_data_4_5(const TouchedChunks *touched_chunks,
 		warning("using 'use.H5Dread_chunk=TRUE' is still "
 			"experimental, use at your own risk");
 
-	ChunkIterator chunk_iter;
-	/* In the context of method 5, 'chunk_iter.mem_vp.h5off'
-	   and 'chunk_iter.mem_vp.h5dim' will be used, not just
-	   'chunk_iter.mem_vp.off' and 'chunk_iter.mem_vp.dim',
-	   so we set 'alloc_full_mem_vp' (last arg) to 1. */
-	int ret = _init_ChunkIterator(&chunk_iter, touched_chunks, method == 5);
-	if (ret < 0)
-		return ret;
-
-	const H5DSetDescriptor *h5dset = touched_chunks->h5dset;
+	const H5DSetDescriptor *h5dset = all_tchunks->h5dset;
 	int ndim = h5dset->ndim;
-	size_t *inner_midx_buf = R_alloc0_size_t_array(ndim);
-
-	void *out = DATAPTR(Rarray);
-	if (out == NULL) {
-		_destroy_ChunkIterator(&chunk_iter);
-		return -1;
-	}
 
 	hid_t out_space_id = _create_mem_space(ndim, Rarray_dim);
-	if (out_space_id < 0) {
-		_destroy_ChunkIterator(&chunk_iter);
+	if (out_space_id < 0)
 		return -1;
-	}
+
+	size_t *inner_midx_buf = R_alloc0_size_t_array(ndim);
 
 	ChunkDataBuffer chunk_data_buf;
-	ret = _init_ChunkDataBuffer(&chunk_data_buf, h5dset, 0);
+	int ret = _init_ChunkDataBuffer(&chunk_data_buf, h5dset, 0);
 	if (ret < 0) {
 		H5Sclose(out_space_id);
-		_destroy_ChunkIterator(&chunk_iter);
 		return ret;
 	}
-	/* Walk over the chunks touched by the user-supplied array selection. */
-	while ((ret = _next_chunk(chunk_iter))) {
-		if (ret < 0)
-			break;
-		//_print_tchunk_info(&chunk_iter);
-		int direct_load = method == 5 && _tchunk_is_fully_selected(ndim,
-							&chunk_iter.h5dset_vp,
-							&chunk_iter.mem_vp);
-		if (direct_load) {
-			/* Load the chunk **directly** into 'Rarray' (no
-			   intermediate buffer). */
-			ret = _read_H5Viewport(h5dset,
-				&chunk_iter.h5dset_vp,
-				h5dset->h5type->native_type_id_for_Rtype,
-				out_space_id, out,
-				&chunk_iter.mem_vp);
-		} else {
-			/* Load the **entire** chunk to an intermediate
-			   buffer then copy the user-selected chunk data
-			   from the intermediate buffer to 'Rarray'. */
-			//clock_t t0 = clock();
-			ret = _load_chunk(&chunk_iter,
-					  &chunk_data_buf,
-					  use_H5Dread_chunk);
+	/* Walk over the touched chunks. */
+	if (1) {
+		/* Sequential walk. */
+		TChunkIterator tchunk_iter;
+		/* In the context of method 5, 'tchunk_iter.mem_vp.h5off'
+		   and 'tchunk_iter.mem_vp.h5dim' will be used, not just
+		   'tchunk_iter.mem_vp.off' and 'tchunk_iter.mem_vp.dim',
+		   so we set 'alloc_full_mem_vp' (last arg) to 1. */
+		ret = _init_TChunkIterator(&tchunk_iter, all_tchunks,
+					   method == 5);
+		if (ret < 0) {
+			_destroy_ChunkDataBuffer(&chunk_data_buf);
+			H5Sclose(out_space_id);
+			return ret;
+		}
+		while ((ret = _next_tchunk(&tchunk_iter))) {
 			if (ret < 0)
 				break;
-			//double dt = (1.0 * clock() - t0) * 1000.0 / CLOCKS_PER_SEC;
-			//printf("- load chunk: %3.3f ms\n", dt);
-
-			long long int nvals =
-				copy_selected_chunk_data_to_Rarray(
-						&chunk_iter,
-						&chunk_data_buf,
-						inner_midx_buf,
-						Rarray_dim, Rarray);
-			if (nvals < 0)
+			//_print_tchunk_info(&chunk_iter);
+			ret = read_chunk_data_4_5(h5dset,
+						  tchunk_iter.all_tchunks,
+						  &tchunk_iter.tchunk_vps,
+						  out_space_id,
+						  inner_midx_buf,
+						  &chunk_data_buf,
+						  Rarray_dim, Rarray,
+						  method, use_H5Dread_chunk);
+			if (ret < 0)
 				break;
-			if (h5dset->h5type->is_variable_str)
-				_reclaim_vlen_bufs(&chunk_data_buf);
 		}
-		if (ret < 0)
-			break;
+		_destroy_TChunkIterator(&tchunk_iter);
+	} else {
+		/* Parallel walk.
+		   WARNING: Do NOT share 'ret', 'tchunk_vps', 'tchunk_midx_buf',
+		   'inner_midx_buf', or 'chunk_data_buf'! */
+		TChunkViewports tchunk_vps;
+		ret = _alloc_TChunkViewports(&tchunk_vps, ndim, method == 5);
+		if (ret < 0) {
+			_destroy_ChunkDataBuffer(&chunk_data_buf);
+			H5Sclose(out_space_id);
+			return ret;
+		}
+
+		size_t *tchunk_midx_buf = R_alloc0_size_t_array(ndim);
+
+		//#pragma omp parallel for schedule(static)
+		for (long long int i = 0;
+		     i < all_tchunks->total_num_tchunks;
+		     i++)
+		{
+			ret = _get_tchunk(all_tchunks, i,
+					  tchunk_midx_buf, &tchunk_vps);
+			if (ret < 0)
+				break;
+			ret = read_chunk_data_4_5(h5dset,
+						  all_tchunks,
+						  &tchunk_vps,
+						  out_space_id,
+						  inner_midx_buf,
+						  &chunk_data_buf,
+						  Rarray_dim, Rarray,
+						  method, use_H5Dread_chunk);
+			if (ret < 0)
+				break;
+		}
+		_free_TChunkViewports(&tchunk_vps);
 	}
 	_destroy_ChunkDataBuffer(&chunk_data_buf);
 	H5Sclose(out_space_id);
-	_destroy_ChunkIterator(&chunk_iter);
 	return ret;
 }
 
@@ -539,7 +621,7 @@ static void update_inner_breakpoints(int ndim, int moved_along,
 }
 
 static void init_inner_vp(int ndim, SEXP index,
-		const H5Viewport *h5dset_vp,
+		const H5Viewport *h5chunk_vp,
 		H5Viewport *inner_vp)
 {
 	int along, h5along;
@@ -547,8 +629,8 @@ static void init_inner_vp(int ndim, SEXP index,
 		SEXP start = GET_LIST_ELT(index, along);
 		hsize_t d;
 		if (start == R_NilValue) {
-			inner_vp->h5off[h5along] = h5dset_vp->h5off[h5along];
-			d = h5dset_vp->h5dim[h5along];
+			inner_vp->h5off[h5along] = h5chunk_vp->h5off[h5along];
+			d = h5chunk_vp->h5dim[h5along];
 		} else {
 			d = 1;
 		}
@@ -588,7 +670,7 @@ static void update_inner_vp(int ndim,
 /* Return nb of hyperslabs (or -1 on error). */
 static long long int select_intersection_of_chips_with_chunk(
 		const H5DSetDescriptor *h5dset, SEXP index,
-		const H5Viewport *out_vp, const H5Viewport *h5dset_vp,
+		const TChunkViewports *tchunk_vps,
 		const LLongAEAE *inner_breakpoint_bufs,
 		const size_t *inner_nchip,
 		size_t *inner_midx_buf,
@@ -602,7 +684,7 @@ static long long int select_intersection_of_chips_with_chunk(
 
 	int ndim = h5dset->ndim;
 
-	init_inner_vp(ndim, index, h5dset_vp, inner_vp);
+	init_inner_vp(ndim, index, &tchunk_vps->h5chunk_vp, inner_vp);
 
 	/* Walk on the "inner chips" i.e. on the intersections between
 	   the "chips" in the user-supplied array selection and the currrent
@@ -611,7 +693,7 @@ static long long int select_intersection_of_chips_with_chunk(
 	int inner_moved_along = ndim;
 	do {
 		num_hyperslabs++;
-		update_inner_vp(ndim, index, out_vp,
+		update_inner_vp(ndim, index, &tchunk_vps->mem_vp,
 				inner_midx_buf, inner_moved_along,
 				inner_breakpoint_bufs,
 				inner_vp);
@@ -626,20 +708,21 @@ static long long int select_intersection_of_chips_with_chunk(
 }
 
 static int direct_load_selected_chunk_data(
-		const ChunkIterator *chunk_iter,
+		const TChunkIterator *tchunk_iter,
 		size_t *inner_midx_buf,
 		H5Viewport *inner_vp,
 		LLongAEAE *inner_breakpoint_bufs,
 		size_t *inner_nchip_buf,
 		hid_t out_space_id, void *out)
 {
-	const H5DSetDescriptor *h5dset = chunk_iter->touched_chunks->h5dset;
-	update_inner_breakpoints(h5dset->ndim, chunk_iter->moved_along,
-			chunk_iter->touched_chunks->index, &chunk_iter->mem_vp,
+	const H5DSetDescriptor *h5dset = tchunk_iter->all_tchunks->h5dset;
+	update_inner_breakpoints(h5dset->ndim, tchunk_iter->moved_along,
+			tchunk_iter->all_tchunks->index,
+			&tchunk_iter->tchunk_vps.mem_vp,
 			inner_breakpoint_bufs, inner_nchip_buf);
 	int ret = select_intersection_of_chips_with_chunk(
-			h5dset, chunk_iter->touched_chunks->index,
-			&chunk_iter->mem_vp, &chunk_iter->h5dset_vp,
+			h5dset, tchunk_iter->all_tchunks->index,
+			&tchunk_iter->tchunk_vps,
 			inner_breakpoint_bufs, inner_nchip_buf,
 			inner_midx_buf, inner_vp);
 	if (ret < 0)
@@ -647,22 +730,22 @@ static int direct_load_selected_chunk_data(
 	return _read_h5selection(h5dset,
 				h5dset->h5type->native_type_id_for_Rtype,
 				out_space_id, out,
-				&chunk_iter->mem_vp);
+				&tchunk_iter->tchunk_vps.mem_vp);
 }
 
-static int read_data_6(const TouchedChunks *touched_chunks,
+static int read_data_6(const AllTChunks *all_tchunks,
 		const size_t *Rarray_dim, SEXP Rarray)
 {
-	ChunkIterator chunk_iter;
-	/* In the context of method 6, 'chunk_iter.mem_vp.h5off'
-	   and 'chunk_iter.mem_vp.h5dim' will be used, not just
-	   'chunk_iter.mem_vp.off' and 'chunk_iter.mem_vp.dim',
+	TChunkIterator tchunk_iter;
+	/* In the context of method 6, 'tchunk_iter.mem_vp.h5off'
+	   and 'tchunk_iter.mem_vp.h5dim' will be used, not just
+	   'tchunk_iter.mem_vp.off' and 'tchunk_iter.mem_vp.dim',
 	   so we set 'alloc_full_mem_vp' (last arg) to 1. */
-	int ret = _init_ChunkIterator(&chunk_iter, touched_chunks, 1);
+	int ret = _init_TChunkIterator(&tchunk_iter, all_tchunks, 1);
 	if (ret < 0)
 		return ret;
 
-	const H5DSetDescriptor *h5dset = touched_chunks->h5dset;
+	const H5DSetDescriptor *h5dset = all_tchunks->h5dset;
 	int ndim = h5dset->ndim;
 	size_t *inner_midx_buf  = R_alloc0_size_t_array(ndim);
 	size_t *inner_nchip_buf = R_alloc0_size_t_array(ndim);
@@ -670,13 +753,13 @@ static int read_data_6(const TouchedChunks *touched_chunks,
 
 	void *out = DATAPTR(Rarray);
 	if (out == NULL) {
-		_destroy_ChunkIterator(&chunk_iter);
+		_destroy_TChunkIterator(&tchunk_iter);
 		return -1;
 	}
 
 	hid_t out_space_id = _create_mem_space(ndim, Rarray_dim);
 	if (out_space_id < 0) {
-		_destroy_ChunkIterator(&chunk_iter);
+		_destroy_TChunkIterator(&tchunk_iter);
 		return -1;
 	}
 
@@ -684,16 +767,16 @@ static int read_data_6(const TouchedChunks *touched_chunks,
 	ret = _alloc_H5Viewport(&inner_vp, ndim, ALLOC_H5OFF_AND_H5DIM);
 	if (ret < 0) {
 		H5Sclose(out_space_id);
-		_destroy_ChunkIterator(&chunk_iter);
+		_destroy_TChunkIterator(&tchunk_iter);
 		return ret;
 	}
 
-	/* Walk over the chunks touched by the user-supplied array selection. */
-	while ((ret = _next_chunk(&chunk_iter))) {
+	/* Walk over the touched chunks. */
+	while ((ret = _next_tchunk(&tchunk_iter))) {
 		if (ret < 0)
 			break;
 		ret = direct_load_selected_chunk_data(
-			&chunk_iter,
+			&tchunk_iter,
 			inner_midx_buf,
 			&inner_vp,
 			inner_breakpoint_bufs, inner_nchip_buf,
@@ -703,7 +786,7 @@ static int read_data_6(const TouchedChunks *touched_chunks,
 	}
 	_free_H5Viewport(&inner_vp);
 	H5Sclose(out_space_id);
-	_destroy_ChunkIterator(&chunk_iter);
+	_destroy_TChunkIterator(&tchunk_iter);
 	return ret;
 }
 
@@ -715,10 +798,10 @@ static int read_data_6(const TouchedChunks *touched_chunks,
  * Return an ordinary array or R_NilValue if an error occured.
  */
 
-SEXP _h5mread_index(const TouchedChunks *touched_chunks,
+SEXP _h5mread_index(const AllTChunks *all_tchunks,
 		    int method, int use_H5Dread_chunk, const size_t *ans_dim)
 {
-	const H5DSetDescriptor *h5dset = touched_chunks->h5dset;
+	const H5DSetDescriptor *h5dset = all_tchunks->h5dset;
 	int ndim = h5dset->ndim;
 	R_xlen_t ans_len = 1;
 	for (int along = 0; along < ndim; along++)
@@ -727,11 +810,11 @@ SEXP _h5mread_index(const TouchedChunks *touched_chunks,
 	int ret;
 	if (method <= 5) {
 		/* methods 4 and 5 */
-		ret = read_data_4_5(touched_chunks, ans_dim, ans,
+		ret = read_data_4_5(all_tchunks, ans_dim, ans,
 				    method, use_H5Dread_chunk);
 	} else {
 		/* method 6 */
-		ret = read_data_6(touched_chunks, ans_dim, ans);
+		ret = read_data_6(all_tchunks, ans_dim, ans);
 	}
 	UNPROTECT(1);
 	return ret < 0 ? R_NilValue : ans;

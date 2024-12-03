@@ -5,7 +5,7 @@
 #include <Rdefines.h>
 
 SEXP _h5mread_sparse(
-	const TouchedChunks *touched_chunks,
+	const AllTChunks *all_tchunks,
 	const size_t *ans_dim
 );
 

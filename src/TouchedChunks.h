@@ -8,7 +8,7 @@
 
 /* A data structure for representing the set of all the HDF5 chunks touched
    by user-supplied N-index. */
-typedef struct touched_chunks_t {
+typedef struct all_tchunks_t {
 	const H5DSetDescriptor *h5dset;
 	SEXP index;                 /* user supplied N-index */
 	LLongAEAE *breakpoint_bufs;
@@ -16,16 +16,20 @@ typedef struct touched_chunks_t {
 				       along each dim */
 	size_t *num_tchunks;        /* nb of touched chunks along each dim */
 	long long int total_num_tchunks;
-} TouchedChunks;
+} AllTChunks;
+
+typedef struct tchunk_viewports_t {
+	H5Viewport h5chunk_vp, mem_vp;
+} TChunkViewports;
 
 /* A data structure for iterating over the chunks of an HDF5 dataset. */
-typedef struct chunk_iterator_t {
-	const TouchedChunks *touched_chunks;
-	H5Viewport h5dset_vp, mem_vp;
+typedef struct tchunk_iterator_t {
+	const AllTChunks *all_tchunks;
 	size_t *tchunk_midx_buf;
-	long long int tchunk_rank;
 	int moved_along;
-} ChunkIterator;
+	long long int tchunk_rank;
+	TChunkViewports tchunk_vps;
+} TChunkIterator;
 
 /* A data structure for storing the data of a full chunk. */
 typedef struct chunk_data_buffer_t {
@@ -39,40 +43,56 @@ typedef struct chunk_data_buffer_t {
 	void *compressed_data;  /* experimental! */
 } ChunkDataBuffer;
 
-int _init_TouchedChunks(
-	TouchedChunks *touched_chunks,
+int _init_AllTChunks(
+	AllTChunks *all_tchunks,
 	const H5DSetDescriptor *h5dset,
 	SEXP index,
 	size_t *selection_dim
 );
 
-void _destroy_ChunkIterator(
-	ChunkIterator *chunk_iter
-);
-
-int _init_ChunkIterator(
-	ChunkIterator *chunk_iter,
-	const TouchedChunks *touched_chunks,
+int _alloc_TChunkViewports(
+	TChunkViewports *tchunk_vps,
+	int ndim,
 	int alloc_full_mem_vp
 );
 
-int _next_chunk(
-	ChunkIterator *chunk_iter
+void _free_TChunkViewports(
+	TChunkViewports *tchunk_vps
 );
 
-void _print_tchunk_info(
-	const ChunkIterator *chunk_iter
+int _get_tchunk(
+	const AllTChunks *all_tchunks,
+	long long int i,
+	size_t *tchunk_midx_buf,
+	TChunkViewports *tchunk_vps
 );
 
 int _tchunk_is_truncated(
 	const H5DSetDescriptor *h5dset,
-	const H5Viewport *h5dset_vp
+	const H5Viewport *h5chunk_vp
 );
 
 int _tchunk_is_fully_selected(
 	int ndim,
-	const H5Viewport *h5dset_vp,
-	const H5Viewport *mem_vp
+	const TChunkViewports *tchunk_vps
+);
+
+void _destroy_TChunkIterator(
+	TChunkIterator *tchunk_iter
+);
+
+int _init_TChunkIterator(
+	TChunkIterator *tchunk_iter,
+	const AllTChunks *all_tchunks,
+	int alloc_full_mem_vp
+);
+
+int _next_tchunk(
+	TChunkIterator *tchunk_iter
+);
+
+void _print_tchunk_info(
+	const TChunkIterator *tchunk_iter
 );
 
 void _destroy_ChunkDataBuffer(
@@ -86,7 +106,8 @@ int _init_ChunkDataBuffer(
 );
 
 int _load_chunk(
-	const ChunkIterator *chunk_iter,
+	const H5DSetDescriptor *h5dset,
+	const TChunkViewports *tchunk_vps,
 	ChunkDataBuffer *chunk_data_buf,
 	int use_H5Dread_chunk
 );

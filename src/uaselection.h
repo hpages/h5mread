@@ -4,6 +4,8 @@
 #include <Rdefines.h>
 #include "S4Vectors_interface.h"
 
+#include <string.h>  /* for memset */
+
 /* Terminology:
    - uaselection: user-supplied array selection.
    - chips: the "chips" in the uaselection are its connected components i.e.

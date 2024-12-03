@@ -1,5 +1,7 @@
 /****************************************************************************
- *               Iterating over the chunks of an HDF5 dataset               *
+ *           Manipulating the "touched" chunks of an HDF5 dataset           *
+ *                          and iterating over them                         *
+ *                                 --------                                 *
  *                            Author: H. Pag\`es                            *
  ****************************************************************************/
 #include "TouchedChunks.h"
@@ -15,23 +17,23 @@
  * Low-level helpers (non-exported)
  */
 
-static int alloc_h5dset_vp_mem_vp(int ndim,
-		H5Viewport *h5dset_vp,
+static int alloc_h5chunk_vp_mem_vp(int ndim,
+		H5Viewport *h5chunk_vp,
 		H5Viewport *mem_vp, int mem_vp_mode)
 {
-	if (_alloc_H5Viewport(h5dset_vp, ndim, ALLOC_H5OFF_AND_H5DIM) < 0)
+	if (_alloc_H5Viewport(h5chunk_vp, ndim, ALLOC_H5OFF_AND_H5DIM) < 0)
 		return -1;
 	if (_alloc_H5Viewport(mem_vp, ndim, mem_vp_mode) < 0) {
-		_free_H5Viewport(h5dset_vp);
+		_free_H5Viewport(h5chunk_vp);
 		return -1;
 	}
 	return 0;
 }
 
-static void free_h5dset_vp_mem_vp(H5Viewport *h5dset_vp, H5Viewport *mem_vp)
+static void free_h5chunk_vp_mem_vp(H5Viewport *h5chunk_vp, H5Viewport *mem_vp)
 {
 	_free_H5Viewport(mem_vp);
-	_free_H5Viewport(h5dset_vp);
+	_free_H5Viewport(h5chunk_vp);
 	return;
 }
 
@@ -73,10 +75,10 @@ static long long int set_num_tchunks(const H5DSetDescriptor *h5dset,
 	return total_num_tchunks;
 }
 
-static void update_h5dset_vp(const H5DSetDescriptor *h5dset,
+static void update_h5chunk_vp(const H5DSetDescriptor *h5dset,
 		const size_t *tchunk_midx, int moved_along,
 		SEXP starts, const LLongAEAE *tchunkidx_bufs,
-		H5Viewport *h5dset_vp)
+		H5Viewport *h5chunk_vp)
 {
 	int ndim = h5dset->ndim;
 	int along, h5along;
@@ -96,16 +98,16 @@ static void update_h5dset_vp(const H5DSetDescriptor *h5dset,
 		hsize_t d = h5dset->h5dim[h5along] - off;
 		if (d > chunkd)
 			d = chunkd;
-		h5dset_vp->h5off[h5along] = off;
-		h5dset_vp->h5dim[h5along] = d;
+		h5chunk_vp->h5off[h5along] = off;
+		h5chunk_vp->h5dim[h5along] = d;
 	}
-	//printf("# h5dset_vp->h5off:");
+	//printf("# h5chunk_vp->h5off:");
 	//for (h5along = ndim - 1; h5along >= 0; h5along--)
-	//      printf(" %llu", h5dset_vp->h5off[h5along]);
+	//      printf(" %llu", h5chunk_vp->h5off[h5along]);
 	//printf("\n");
-	//printf("# h5dset_vp->h5dim:");
+	//printf("# h5chunk_vp->h5dim:");
 	//for (h5along = ndim - 1; h5along >= 0; h5along--)
-	//      printf(" %llu", h5dset_vp->h5dim[h5along]);
+	//      printf(" %llu", h5chunk_vp->h5dim[h5along]);
 	//printf("\n");
 	return;
 }
@@ -113,7 +115,7 @@ static void update_h5dset_vp(const H5DSetDescriptor *h5dset,
 static void update_mem_vp(const H5DSetDescriptor *h5dset,
 		const size_t *tchunk_midx, int moved_along,
 		SEXP starts, const LLongAEAE *breakpoint_bufs,
-		const H5Viewport *h5dset_vp, H5Viewport *mem_vp)
+		const H5Viewport *h5chunk_vp, H5Viewport *mem_vp)
 {
 	int ndim = h5dset->ndim;
 	int along, h5along;
@@ -129,8 +131,8 @@ static void update_mem_vp(const H5DSetDescriptor *h5dset,
 			off = i == 0 ? 0 : breakpoint[i - 1];
 			d = breakpoint[i] - off;
 		} else {
-			off = h5dset_vp->h5off[h5along];
-			d = h5dset_vp->h5dim[h5along];
+			off = h5chunk_vp->h5off[h5along];
+			d = h5chunk_vp->h5dim[h5along];
 		}
 		if (mem_vp->h5off != NULL) {
 			mem_vp->h5off[h5along] = (hsize_t) off;
@@ -150,21 +152,22 @@ static void update_mem_vp(const H5DSetDescriptor *h5dset,
 	return;
 }
 
-static void update_h5dset_vp_mem_vp(const H5DSetDescriptor *h5dset,
+static void update_TChunkViewports(const H5DSetDescriptor *h5dset,
 		const size_t *tchunk_midx, int moved_along,
 		SEXP starts,
 		const LLongAEAE *breakpoint_bufs,
 		const LLongAEAE *tchunkidx_bufs,
-		H5Viewport *h5dset_vp, H5Viewport *mem_vp)
+		TChunkViewports *tchunk_vps)
 {
-	update_h5dset_vp(h5dset,
+	update_h5chunk_vp(h5dset,
 			tchunk_midx, moved_along,
 			starts, tchunkidx_bufs,
-			h5dset_vp);
+			&tchunk_vps->h5chunk_vp);
 	update_mem_vp(h5dset,
 			tchunk_midx, moved_along,
 			starts, breakpoint_bufs,
-			h5dset_vp, mem_vp);
+			&tchunk_vps->h5chunk_vp,
+			&tchunk_vps->mem_vp);
 	return;
 }
 
@@ -345,10 +348,10 @@ static int read_h5chunk(hid_t dset_id,
 
 
 /****************************************************************************
- * Exported functions
+ * _init_AllTChunks()
  */
 
-int _init_TouchedChunks(TouchedChunks *touched_chunks,
+int _init_AllTChunks(AllTChunks *all_tchunks,
 		const H5DSetDescriptor *h5dset, SEXP index,
 		size_t *selection_dim)
 {
@@ -358,8 +361,8 @@ int _init_TouchedChunks(TouchedChunks *touched_chunks,
 	}
 
 	/* Set struct members 'h5dset' and 'index'. */
-	touched_chunks->h5dset = h5dset;
-	touched_chunks->index = index;
+	all_tchunks->h5dset = h5dset;
+	all_tchunks->index = index;
 
 	/* Set struct members 'breakpoint_bufs' and 'tchunkidx_bufs'.
 	   Also populate 'selection_dim' if not set to NULL. */
@@ -370,55 +373,133 @@ int _init_TouchedChunks(TouchedChunks *touched_chunks,
 					 breakpoint_bufs, tchunkidx_bufs);
 	if (ret < 0)
 		return -1;
-	touched_chunks->breakpoint_bufs = breakpoint_bufs;
-	touched_chunks->tchunkidx_bufs  = tchunkidx_bufs;
+	all_tchunks->breakpoint_bufs = breakpoint_bufs;
+	all_tchunks->tchunkidx_bufs  = tchunkidx_bufs;
 
 	/* Set struct members 'num_tchunks' and 'total_num_tchunks'. */
-	touched_chunks->num_tchunks = R_alloc0_size_t_array(ndim);
-	touched_chunks->total_num_tchunks = set_num_tchunks(h5dset, index,
+	all_tchunks->num_tchunks = R_alloc0_size_t_array(ndim);
+	all_tchunks->total_num_tchunks = set_num_tchunks(h5dset, index,
 						tchunkidx_bufs,
-						touched_chunks->num_tchunks);
+						all_tchunks->num_tchunks);
 	return 0;
 }
 
-void _destroy_ChunkIterator(ChunkIterator *chunk_iter)
+
+/****************************************************************************
+ * TChunkViewports utilities
+ */
+
+int _alloc_TChunkViewports(TChunkViewports *tchunk_vps,
+			   int ndim, int alloc_full_mem_vp)
 {
-	if (chunk_iter->h5dset_vp.h5off != NULL)
-		free_h5dset_vp_mem_vp(&chunk_iter->h5dset_vp,
-				      &chunk_iter->mem_vp);
+	return alloc_h5chunk_vp_mem_vp(ndim,
+				       &tchunk_vps->h5chunk_vp,
+				       &tchunk_vps->mem_vp,
+				       alloc_full_mem_vp ? ALLOC_ALL_FIELDS
+							 : ALLOC_OFF_AND_DIM);
+}
+
+void _free_TChunkViewports(TChunkViewports *tchunk_vps)
+{
+	free_h5chunk_vp_mem_vp(&tchunk_vps->h5chunk_vp, &tchunk_vps->mem_vp);
 	return;
 }
 
-int _init_ChunkIterator(ChunkIterator *chunk_iter,
-			const TouchedChunks *touched_chunks,
-			int alloc_full_mem_vp)
+int _get_tchunk(const AllTChunks *all_tchunks, long long int i,
+		size_t *tchunk_midx_buf,
+		TChunkViewports *tchunk_vps)
 {
-	/* Set this first because it controls what _destroy_ChunkIterator()
-	   needs to free or close. */
-	chunk_iter->h5dset_vp.h5off = NULL;
+	const H5DSetDescriptor *h5dset = all_tchunks->h5dset;
+	//printf("_get_tchunk(): Touched block %3lld/%3lld: ",
+	//       i, all_tchunks->total_num_tchunks);
+	for (int along = 0; along < h5dset->ndim; along++) {
+		size_t n = all_tchunks->num_tchunks[along];
+		tchunk_midx_buf[along] = i % n;
+		//printf(" %3ld/%ld", tchunk_midx_buf[along], n);
+		i /= n;
+	}
+	//printf("\n");
+	if (i != 0) {
+		PRINT_TO_ERRMSG_BUF("i >= total_num_tchunks");
+		return -1;
+	}
+	update_TChunkViewports(h5dset,
+			       tchunk_midx_buf,
+			       h5dset->ndim,
+			       all_tchunks->index,
+			       all_tchunks->breakpoint_bufs,
+			       all_tchunks->tchunkidx_bufs,
+			       tchunk_vps);
+	return 0;
+}
 
-	/* Set struct member 'touched_chunks'. */
-	chunk_iter->touched_chunks = touched_chunks;
+/* Return 1 if the chunk that 'h5chunk_vp' is pointing at is "truncated"
+   (a.k.a. "partial edge chunk" in HDF5's terminology), and 0 otherwise
+   (i.e. if the new chunk is a full-size chunk). */
+int _tchunk_is_truncated(const H5DSetDescriptor *h5dset,
+			 const H5Viewport *h5chunk_vp)
+{
+	int ndim, h5along;
+	hsize_t chunkd, d;
 
-	/* Allocate struct members 'h5dset_vp' and 'mem_vp'. */
-	int ndim = touched_chunks->h5dset->ndim;
-	int ret = alloc_h5dset_vp_mem_vp(ndim,
-				&chunk_iter->h5dset_vp,
-				&chunk_iter->mem_vp,
-				alloc_full_mem_vp ? ALLOC_ALL_FIELDS
-						  : ALLOC_OFF_AND_DIM);
+	ndim = h5dset->ndim;
+	for (h5along = 0; h5along < ndim; h5along++) {
+		chunkd = h5dset->h5chunkdim[h5along];
+		d = h5chunk_vp->h5dim[h5along];
+		if (d != chunkd)
+			return 1;
+	}
+	return 0;
+}
+
+int _tchunk_is_fully_selected(int ndim, const TChunkViewports *tchunk_vps)
+{
+	int along, h5along, not_fully;
+
+	for (along = 0, h5along = ndim - 1; along < ndim; along++, h5along--) {
+		not_fully = tchunk_vps->h5chunk_vp.h5dim[h5along] !=
+			    (hsize_t) tchunk_vps->mem_vp.dim[along];
+		if (not_fully)
+			return 0;
+	}
+	return 1;
+}
+
+
+/****************************************************************************
+ * TChunkIterator utilities
+ */
+
+void _destroy_TChunkIterator(TChunkIterator *tchunk_iter)
+{
+	_free_TChunkViewports(&tchunk_iter->tchunk_vps);
+	return;
+}
+
+int _init_TChunkIterator(TChunkIterator *tchunk_iter,
+			 const AllTChunks *all_tchunks,
+			 int alloc_full_mem_vp)
+{
+	/* Set struct member 'all_tchunks'. */
+	tchunk_iter->all_tchunks = all_tchunks;
+
+	/* Allocate struct member 'tchunk_vps'. */
+	int ndim = all_tchunks->h5dset->ndim;
+	int ret = _alloc_TChunkViewports(&tchunk_iter->tchunk_vps,
+					 ndim,
+					 alloc_full_mem_vp);
 	if (ret < 0)
 		goto on_error;
 
 	/* Set struct member 'tchunk_midx_buf'. */
-	chunk_iter->tchunk_midx_buf = R_alloc0_size_t_array(ndim);
+	tchunk_iter->tchunk_midx_buf = R_alloc0_size_t_array(ndim);
 
 	/* Set struct member 'tchunk_rank'. */
-	chunk_iter->tchunk_rank = -1;
+	tchunk_iter->tchunk_rank = -1;
 	return 0;
 
     on_error:
-	_destroy_ChunkIterator(chunk_iter);
+	_destroy_TChunkIterator(tchunk_iter);
 	return -1;
 }
 
@@ -429,56 +510,56 @@ int _init_ChunkIterator(ChunkIterator *chunk_iter,
  *         the next chunk was not possible;
  *   < 0 = if error
  * Typical use:
- *     while (ret = _next_chunk(&chunk_iter)) {
+ *     while (ret = _next_tchunk(tchunk_iter, tchunk_vps)) {
  *         if (ret < 0) {
  *             an error occured
  *         }
- *         handle current chunk
+ *         handle 'tchunk_vps'
  *     }
  */
-int _next_chunk(ChunkIterator *chunk_iter)
+int _next_tchunk(TChunkIterator *tchunk_iter)
 {
-	const TouchedChunks *touched_chunks = chunk_iter->touched_chunks;
-	chunk_iter->tchunk_rank++;
-	if (chunk_iter->tchunk_rank == touched_chunks->total_num_tchunks)
+	const AllTChunks *all_tchunks = tchunk_iter->all_tchunks;
+	tchunk_iter->tchunk_rank++;
+	if (tchunk_iter->tchunk_rank == all_tchunks->total_num_tchunks)
 		return 0;
-	const H5DSetDescriptor *h5dset = touched_chunks->h5dset;
-	chunk_iter->moved_along = chunk_iter->tchunk_rank == 0 ?
+	const H5DSetDescriptor *h5dset = all_tchunks->h5dset;
+	tchunk_iter->moved_along = tchunk_iter->tchunk_rank == 0 ?
 					h5dset->ndim :
 					next_midx(h5dset->ndim,
-						  touched_chunks->num_tchunks,
-						  chunk_iter->tchunk_midx_buf);
-	update_h5dset_vp_mem_vp(h5dset,
-			chunk_iter->tchunk_midx_buf,
-			chunk_iter->moved_along,
-			touched_chunks->index,
-			touched_chunks->breakpoint_bufs,
-			touched_chunks->tchunkidx_bufs,
-			&chunk_iter->h5dset_vp, &chunk_iter->mem_vp);
+						  all_tchunks->num_tchunks,
+						  tchunk_iter->tchunk_midx_buf);
+	update_TChunkViewports(h5dset,
+			       tchunk_iter->tchunk_midx_buf,
+			       tchunk_iter->moved_along,
+			       all_tchunks->index,
+			       all_tchunks->breakpoint_bufs,
+			       all_tchunks->tchunkidx_bufs,
+			       &tchunk_iter->tchunk_vps);
 	return 1;
 }
 
-void _print_tchunk_info(const ChunkIterator *chunk_iter)
+void _print_tchunk_info(const TChunkIterator *tchunk_iter)
 {
-	const TouchedChunks *touched_chunks = chunk_iter->touched_chunks;
+	const AllTChunks *all_tchunks = tchunk_iter->all_tchunks;
 	Rprintf("processing chunk %lld/%lld: [",
-		chunk_iter->tchunk_rank + 1, touched_chunks->total_num_tchunks);
-	int ndim = touched_chunks->h5dset->ndim;
+		tchunk_iter->tchunk_rank + 1, all_tchunks->total_num_tchunks);
+	int ndim = all_tchunks->h5dset->ndim;
 	for (int along = 0; along < ndim; along++) {
-		size_t i = chunk_iter->tchunk_midx_buf[along] + 1;
+		size_t i = tchunk_iter->tchunk_midx_buf[along] + 1;
 		if (along != 0)
 			Rprintf(", ");
-		Rprintf("%lu/%lu", i, touched_chunks->num_tchunks[along]);
+		Rprintf("%lu/%lu", i, all_tchunks->num_tchunks[along]);
 	}
 	Rprintf("] -- <<");
 	int along, h5along;
 	for (along = 0, h5along = ndim - 1; along < ndim; along++, h5along--) {
-		size_t i = chunk_iter->tchunk_midx_buf[along];
-		SEXP start = GET_LIST_ELT(touched_chunks->index, along);
+		size_t i = tchunk_iter->tchunk_midx_buf[along];
+		SEXP start = GET_LIST_ELT(all_tchunks->index, along);
 		long long int tchunkidx;
 		if (start != R_NilValue) {
 			const LLongAEAE *tchunkidx_bufs =
-						touched_chunks->tchunkidx_bufs;
+						all_tchunks->tchunkidx_bufs;
 			tchunkidx = tchunkidx_bufs->elts[along]->elts[i];
 		} else {
 			tchunkidx = (long long int) i;
@@ -486,47 +567,18 @@ void _print_tchunk_info(const ChunkIterator *chunk_iter)
 		if (along != 0)
 			Rprintf(", ");
 		Rprintf("#%lld=%llu:%llu", tchunkidx + 1,
-			chunk_iter->h5dset_vp.h5off[h5along] + 1,
-			chunk_iter->h5dset_vp.h5off[h5along] +
-			    chunk_iter->h5dset_vp.h5dim[h5along]);
+			tchunk_iter->tchunk_vps.h5chunk_vp.h5off[h5along] + 1,
+			tchunk_iter->tchunk_vps.h5chunk_vp.h5off[h5along] +
+			    tchunk_iter->tchunk_vps.h5chunk_vp.h5dim[h5along]);
 	}
 	Rprintf(">>\n");
 	return;
 }
 
-/* Return 1 if the chunk that 'h5dset_vp' is pointing at is "truncated"
-   (a.k.a. "partial edge chunk" in HDF5's terminology), and 0 otherwise
-   (i.e. if the new chunk is a full-size chunk). */
-int _tchunk_is_truncated(const H5DSetDescriptor *h5dset,
-			 const H5Viewport *h5dset_vp)
-{
-	int ndim, h5along;
-	hsize_t chunkd, d;
 
-	ndim = h5dset->ndim;
-	for (h5along = 0; h5along < ndim; h5along++) {
-		chunkd = h5dset->h5chunkdim[h5along];
-		d = h5dset_vp->h5dim[h5along];
-		if (d != chunkd)
-			return 1;
-	}
-	return 0;
-}
-
-int _tchunk_is_fully_selected(int ndim,
-		const H5Viewport *h5dset_vp,
-		const H5Viewport *mem_vp)
-{
-	int along, h5along, not_fully;
-
-	for (along = 0, h5along = ndim - 1; along < ndim; along++, h5along--) {
-		not_fully = h5dset_vp->h5dim[h5along] !=
-			    (hsize_t) mem_vp->dim[along];
-		if (not_fully)
-			return 0;
-	}
-	return 1;
-}
+/****************************************************************************
+ * ChunkDataBuffer utilities
+ */
 
 void _destroy_ChunkDataBuffer(ChunkDataBuffer *chunk_data_buf)
 {
@@ -593,11 +645,11 @@ int _init_ChunkDataBuffer(ChunkDataBuffer *chunk_data_buf,
 	return 0;
 }
 
-int _load_chunk(const ChunkIterator *chunk_iter,
+int _load_chunk(const H5DSetDescriptor *h5dset,
+		const TChunkViewports *tchunk_vps,
 		ChunkDataBuffer *chunk_data_buf,
 		int use_H5Dread_chunk)
 {
-	const H5DSetDescriptor *h5dset;
 	hid_t data_space_id;
 	int ret;
 
@@ -609,7 +661,6 @@ int _load_chunk(const ChunkIterator *chunk_iter,
 			return -1;
 		}
 	}
-	h5dset = chunk_iter->touched_chunks->h5dset;
 	if (!use_H5Dread_chunk) {
 		if (chunk_data_buf->data_space_id == -1) {
 			data_space_id = H5Screate_simple(h5dset->ndim,
@@ -629,9 +680,9 @@ int _load_chunk(const ChunkIterator *chunk_iter,
 			if (chunk_data_buf->data_vp.h5off == NULL)
 				return -1;
 		}
-		chunk_data_buf->data_vp.h5dim = chunk_iter->h5dset_vp.h5dim;
+		chunk_data_buf->data_vp.h5dim = tchunk_vps->h5chunk_vp.h5dim;
 		ret = _read_H5Viewport(h5dset,
-				&chunk_iter->h5dset_vp,
+				&tchunk_vps->h5chunk_vp,
 				chunk_data_buf->data_type_id,
 				chunk_data_buf->data_space_id,
 				chunk_data_buf->data,
@@ -650,7 +701,7 @@ int _load_chunk(const ChunkIterator *chunk_iter,
 			}
 		}
 		ret = read_h5chunk(h5dset->dset_id,
-				   &chunk_iter->h5dset_vp,
+				   &tchunk_vps->h5chunk_vp,
 				   chunk_data_buf);
 	}
 	return ret;

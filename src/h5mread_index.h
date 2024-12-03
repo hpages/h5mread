@@ -5,7 +5,7 @@
 #include <Rdefines.h>
 
 SEXP _h5mread_index(
-	const TouchedChunks *touched_chunks,
+	const AllTChunks *all_tchunks,
 	int method,
 	int use_H5Dread_chunk,
 	const size_t *ans_dim
