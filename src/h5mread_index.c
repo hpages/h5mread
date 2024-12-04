@@ -13,6 +13,14 @@
 #include <string.h>  /* for memcmp */
 //#include <time.h>
 
+#ifdef _OPENMP
+/* <Rinternals.h> defines macro match that seems to break <omp.h> on
+   some versions of Clang.
+   See https://github.com/Bioconductor/SparseArray/issues/9 */
+#undef match
+#include <omp.h>
+#endif
+
 
 /****************************************************************************
  * copy_selected_chunk_data_to_Rarray()
@@ -477,6 +485,186 @@ static int read_chunk_data_4_5(const H5DSetDescriptor *h5dset,
 	return 0;
 }
 
+static int read_data_4_5_sequential(const AllTChunks *all_tchunks,
+		const size_t *Rarray_dim, SEXP Rarray,
+		int method, int use_H5Dread_chunk,
+		hid_t out_space_id)
+{
+	TChunkIterator tchunk_iter;
+	/* In the context of method 5, 'tchunk_iter.mem_vp.h5off'
+	   and 'tchunk_iter.mem_vp.h5dim' will be used, not just
+	   'tchunk_iter.mem_vp.off' and 'tchunk_iter.mem_vp.dim',
+	   so we set 'alloc_full_mem_vp' (last arg) to 1. */
+	int ret = _init_TChunkIterator(&tchunk_iter, all_tchunks, method == 5);
+	if (ret < 0)
+		return ret;
+
+	const H5DSetDescriptor *h5dset = all_tchunks->h5dset;
+
+	size_t *inner_midx_buf = R_alloc0_size_t_array(h5dset->ndim);
+
+	ChunkDataBuffer chunk_data_buf;
+	ret = _init_ChunkDataBuffer(&chunk_data_buf, h5dset, 0);
+	if (ret < 0) {
+		_destroy_TChunkIterator(&tchunk_iter);
+		return ret;
+	}
+
+	while ((ret = _next_tchunk(&tchunk_iter))) {
+		if (ret < 0)
+			break;
+		//_print_tchunk_info(&chunk_iter);
+		ret = read_chunk_data_4_5(h5dset,
+					  all_tchunks,
+					  &tchunk_iter.tchunk_vps,
+					  out_space_id,
+					  inner_midx_buf,
+					  &chunk_data_buf,
+					  Rarray_dim, Rarray,
+					  method, use_H5Dread_chunk);
+		if (ret < 0)
+			break;
+	}
+
+	_destroy_ChunkDataBuffer(&chunk_data_buf);
+	_destroy_TChunkIterator(&tchunk_iter);
+	return ret;
+}
+
+#ifdef _OPENMP  /* --- Begin read_data_4_5_parallel() --- */
+
+static void destroy_TChunkViewports_pool(TChunkViewports *tchunk_vps_pool,
+					 int max_threads)
+{
+	for (int t = 0; t < max_threads; t++)
+		_free_TChunkViewports(tchunk_vps_pool + t);
+	return;
+}
+
+static TChunkViewports *create_TChunkViewports_pool(int max_threads,
+		int ndim, int alloc_full_mem_vp)
+{
+	TChunkViewports *tchunk_vps_pool = (TChunkViewports *)
+		R_alloc((size_t) max_threads, sizeof(TChunkViewports));
+	for (int t = 0; t < max_threads; t++) {
+		int ret = _alloc_TChunkViewports(tchunk_vps_pool + t,
+						 ndim, alloc_full_mem_vp);
+		if (ret < 0) {
+			destroy_TChunkViewports_pool(tchunk_vps_pool, t);
+			return NULL;
+		}
+	}
+	return tchunk_vps_pool;
+}
+
+static void destroy_ChunkDataBuffer_pool(ChunkDataBuffer *chunk_data_buf_pool,
+                                         int max_threads)
+{
+        for (int t = 0; t < max_threads; t++)
+		_destroy_ChunkDataBuffer(chunk_data_buf_pool + t);
+        return;
+}
+
+static ChunkDataBuffer *create_ChunkDataBuffer_pool(int max_threads,
+		const H5DSetDescriptor *h5dset)
+{
+	ChunkDataBuffer *chunk_data_buf_pool = (ChunkDataBuffer *)
+		R_alloc((size_t) max_threads, sizeof(ChunkDataBuffer));
+	for (int t = 0; t < max_threads; t++) {
+		int ret = _init_ChunkDataBuffer(chunk_data_buf_pool + t,
+						h5dset, 0);
+		if (ret < 0) {
+			destroy_ChunkDataBuffer_pool(chunk_data_buf_pool, t);
+			return NULL;
+		}
+	}
+	return chunk_data_buf_pool;
+}
+
+static int read_data_4_5_parallel(const AllTChunks *all_tchunks,
+		const size_t *Rarray_dim, SEXP Rarray,
+		int method, int use_H5Dread_chunk,
+		hid_t out_space_id)
+{
+	//printf("read_data_4_5_parallel(): ok1\n");
+
+	const H5DSetDescriptor *h5dset = all_tchunks->h5dset;
+	int ndim = h5dset->ndim;
+
+	int max_threads = omp_get_max_threads();
+	//printf("max_threads = %d\n", max_threads);
+
+	/* Create pool of TChunkViewports structs. */
+	TChunkViewports *tchunk_vps_pool =
+		create_TChunkViewports_pool(max_threads, ndim, method == 5);
+	if (tchunk_vps_pool == NULL)
+		return -1;
+
+	//printf("read_data_4_5_parallel(): ok2\n");
+
+	/* Create pools of 'tchunk_midx_buf' and 'inner_midx_buf' arrays. */
+	size_t *midx_buf_pools = R_alloc0_size_t_array(ndim * max_threads * 2);
+	size_t *tchunk_midx_buf_pool = midx_buf_pools;
+	size_t *inner_midx_buf_pool = midx_buf_pools + ndim * max_threads;
+
+	/* Create pool of ChunkDataBuffer structs. */
+	ChunkDataBuffer *chunk_data_buf_pool =
+		create_ChunkDataBuffer_pool(max_threads, h5dset);
+	if (chunk_data_buf_pool == NULL) {
+		destroy_TChunkViewports_pool(tchunk_vps_pool, max_threads);
+		return -1;
+	}
+
+	//printf("read_data_4_5_parallel(): ok3\n");
+
+	int ret;
+
+	/* WARNING: Do NOT share 'ret', 'tchunk_vps', 'tchunk_midx_buf',
+	   'inner_midx_buf', or 'chunk_data_buf'! */
+	#pragma omp parallel for schedule(static)
+	for (long long int i = 0; i < all_tchunks->total_num_tchunks; i++) {
+		int thread_num = omp_get_thread_num();
+		//printf("read_data_4_5_parallel(): ok4a (thread_num = %d)\n",
+		//	thread_num);
+		TChunkViewports *tchunk_vps = tchunk_vps_pool + thread_num;
+		size_t *tchunk_midx_buf = tchunk_midx_buf_pool +
+					  ndim * thread_num;
+		size_t *inner_midx_buf = inner_midx_buf_pool +
+					  ndim * thread_num;
+		ChunkDataBuffer *chunk_data_buf = chunk_data_buf_pool +
+					  thread_num;
+
+		//printf("read_data_4_5_parallel(): ok4b (thread_num = %d)\n",
+		//	thread_num);
+		ret = _get_tchunk(all_tchunks, i,
+				  tchunk_midx_buf, tchunk_vps);
+		//if (ret < 0)
+		//	break;
+		//printf("read_data_4_5_parallel(): ok4c (thread_num = %d)\n",
+		//	thread_num);
+		ret = read_chunk_data_4_5(h5dset,
+					  all_tchunks,
+					  tchunk_vps,
+					  out_space_id,
+					  inner_midx_buf,
+					  chunk_data_buf,
+					  Rarray_dim, Rarray,
+					  method, use_H5Dread_chunk);
+		//if (ret < 0)
+		//	break;
+		//printf("read_data_4_5_parallel(): ok4d (thread_num = %d)\n",
+		//	thread_num);
+	}
+
+	//printf("read_data_4_5_parallel(): ok5\n");
+	destroy_TChunkViewports_pool(tchunk_vps_pool, max_threads);
+	destroy_ChunkDataBuffer_pool(chunk_data_buf_pool, max_threads);
+	//printf("read_data_4_5_parallel(): ok6\n");
+	return ret;
+}
+
+#endif  /* --- End read_data_4_5_parallel() --- */
+
 static int read_data_4_5(const AllTChunks *all_tchunks,
 		const size_t *Rarray_dim, SEXP Rarray,
 		int method, int use_H5Dread_chunk)
@@ -485,89 +673,24 @@ static int read_data_4_5(const AllTChunks *all_tchunks,
 		warning("using 'use.H5Dread_chunk=TRUE' is still "
 			"experimental, use at your own risk");
 
-	const H5DSetDescriptor *h5dset = all_tchunks->h5dset;
-	int ndim = h5dset->ndim;
-
-	hid_t out_space_id = _create_mem_space(ndim, Rarray_dim);
+	hid_t out_space_id = _create_mem_space(all_tchunks->h5dset->ndim,
+					       Rarray_dim);
 	if (out_space_id < 0)
 		return -1;
 
-	size_t *inner_midx_buf = R_alloc0_size_t_array(ndim);
+	/* --- Walk over the touched chunks --- */
+#ifdef _OPENMP
+	// NOT READY!
+	//int ret = read_data_4_5_parallel(all_tchunks, Rarray_dim, Rarray,
+	int ret = read_data_4_5_sequential(all_tchunks, Rarray_dim, Rarray,
+					   method, use_H5Dread_chunk,
+					   out_space_id);
+#else
+	int ret = read_data_4_5_sequential(all_tchunks, Rarray_dim, Rarray,
+					   method, use_H5Dread_chunk,
+					   out_space_id);
+#endif
 
-	ChunkDataBuffer chunk_data_buf;
-	int ret = _init_ChunkDataBuffer(&chunk_data_buf, h5dset, 0);
-	if (ret < 0) {
-		H5Sclose(out_space_id);
-		return ret;
-	}
-	/* Walk over the touched chunks. */
-	if (1) {
-		/* Sequential walk. */
-		TChunkIterator tchunk_iter;
-		/* In the context of method 5, 'tchunk_iter.mem_vp.h5off'
-		   and 'tchunk_iter.mem_vp.h5dim' will be used, not just
-		   'tchunk_iter.mem_vp.off' and 'tchunk_iter.mem_vp.dim',
-		   so we set 'alloc_full_mem_vp' (last arg) to 1. */
-		ret = _init_TChunkIterator(&tchunk_iter, all_tchunks,
-					   method == 5);
-		if (ret < 0) {
-			_destroy_ChunkDataBuffer(&chunk_data_buf);
-			H5Sclose(out_space_id);
-			return ret;
-		}
-		while ((ret = _next_tchunk(&tchunk_iter))) {
-			if (ret < 0)
-				break;
-			//_print_tchunk_info(&chunk_iter);
-			ret = read_chunk_data_4_5(h5dset,
-						  tchunk_iter.all_tchunks,
-						  &tchunk_iter.tchunk_vps,
-						  out_space_id,
-						  inner_midx_buf,
-						  &chunk_data_buf,
-						  Rarray_dim, Rarray,
-						  method, use_H5Dread_chunk);
-			if (ret < 0)
-				break;
-		}
-		_destroy_TChunkIterator(&tchunk_iter);
-	} else {
-		/* Parallel walk.
-		   WARNING: Do NOT share 'ret', 'tchunk_vps', 'tchunk_midx_buf',
-		   'inner_midx_buf', or 'chunk_data_buf'! */
-		TChunkViewports tchunk_vps;
-		ret = _alloc_TChunkViewports(&tchunk_vps, ndim, method == 5);
-		if (ret < 0) {
-			_destroy_ChunkDataBuffer(&chunk_data_buf);
-			H5Sclose(out_space_id);
-			return ret;
-		}
-
-		size_t *tchunk_midx_buf = R_alloc0_size_t_array(ndim);
-
-		//#pragma omp parallel for schedule(static)
-		for (long long int i = 0;
-		     i < all_tchunks->total_num_tchunks;
-		     i++)
-		{
-			ret = _get_tchunk(all_tchunks, i,
-					  tchunk_midx_buf, &tchunk_vps);
-			if (ret < 0)
-				break;
-			ret = read_chunk_data_4_5(h5dset,
-						  all_tchunks,
-						  &tchunk_vps,
-						  out_space_id,
-						  inner_midx_buf,
-						  &chunk_data_buf,
-						  Rarray_dim, Rarray,
-						  method, use_H5Dread_chunk);
-			if (ret < 0)
-				break;
-		}
-		_free_TChunkViewports(&tchunk_vps);
-	}
-	_destroy_ChunkDataBuffer(&chunk_data_buf);
 	H5Sclose(out_space_id);
 	return ret;
 }
