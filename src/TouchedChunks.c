@@ -101,14 +101,14 @@ static void update_h5chunk_vp(const H5DSetDescriptor *h5dset,
 		h5chunk_vp->h5off[h5along] = off;
 		h5chunk_vp->h5dim[h5along] = d;
 	}
-	//printf("# h5chunk_vp->h5off:");
+	//Rprintf("# h5chunk_vp->h5off:");
 	//for (h5along = ndim - 1; h5along >= 0; h5along--)
-	//      printf(" %llu", h5chunk_vp->h5off[h5along]);
-	//printf("\n");
-	//printf("# h5chunk_vp->h5dim:");
+	//      Rprintf(" %llu", h5chunk_vp->h5off[h5along]);
+	//Rprintf("\n");
+	//Rprintf("# h5chunk_vp->h5dim:");
 	//for (h5along = ndim - 1; h5along >= 0; h5along--)
-	//      printf(" %llu", h5chunk_vp->h5dim[h5along]);
-	//printf("\n");
+	//      Rprintf(" %llu", h5chunk_vp->h5dim[h5along]);
+	//Rprintf("\n");
 	return;
 }
 
@@ -141,14 +141,14 @@ static void update_mem_vp(const H5DSetDescriptor *h5dset,
 		mem_vp->off[along] = (size_t) off;
 		mem_vp->dim[along] = (size_t) d;
 	}
-	//printf("# mem_vp (offsets):");
+	//Rprintf("# mem_vp (offsets):");
 	//for (along = 0; along < ndim; along++)
-	//      printf(" %lu", mem_vp->off[along]);
-	//printf("\n");
-	//printf("# mem_vp (dims):");
+	//      Rprintf(" %lu", mem_vp->off[along]);
+	//Rprintf("\n");
+	//Rprintf("# mem_vp (dims):");
 	//for (along = 0; along < ndim; along++)
-	//      printf(" %lu", mem_vp->dim[along]);
-	//printf("\n");
+	//      Rprintf(" %lu", mem_vp->dim[along]);
+	//Rprintf("\n");
 	return;
 }
 
@@ -254,18 +254,18 @@ static void transpose_bytes(const char *in, size_t nrow, size_t ncol, char *out)
 /*
 static void print_chunk_data(void *data, size_t data_length, size_t data_size)
 {
-	printf("chunk data:");
+	Rprintf("chunk data:");
 	//for (size_t i = 0; i < data_size; i++) {
 	//	if (i % 12 == 0)
-	//		printf("\n ");
-	//	printf(" '%c'", ((char *) data)[i]);
+	//		Rprintf("\n ");
+	//	Rprintf(" '%c'", ((char *) data)[i]);
 	//}
 	for (size_t i = 0; i < data_length; i++) {
 		if (i % 12 == 0)
-			printf("\n ");
-		printf(" %4d", ((int *) data)[i]);
+			Rprintf("\n ");
+		Rprintf(" %4d", ((int *) data)[i]);
 	}
-	printf("\n");
+	Rprintf("\n");
 	return;
 }
 */
@@ -325,7 +325,7 @@ static int read_h5chunk(hid_t dset_id,
 		return -1;
 	}
 
-	//printf("filters = %u\n", filters);
+	//Rprintf("filters = %u\n", filters);
 
 	//FIXME: This will error if chunk data is not compressed!
 	//TODO: Decompress only if chunk data is compressed. There should be
@@ -410,15 +410,15 @@ int _get_tchunk(const AllTChunks *all_tchunks, long long int i,
 		TChunkViewports *tchunk_vps)
 {
 	const H5DSetDescriptor *h5dset = all_tchunks->h5dset;
-	//printf("_get_tchunk(): Touched block %3lld/%3lld: ",
-	//       i, all_tchunks->total_num_tchunks);
+	//Rprintf("_get_tchunk(): Touched block %3lld/%3lld: ",
+	//        i, all_tchunks->total_num_tchunks);
 	for (int along = 0; along < h5dset->ndim; along++) {
 		size_t n = all_tchunks->num_tchunks[along];
 		tchunk_midx_buf[along] = i % n;
-		//printf(" %3ld/%ld", tchunk_midx_buf[along], n);
+		//Rprintf(" %3ld/%ld", tchunk_midx_buf[along], n);
 		i /= n;
 	}
-	//printf("\n");
+	//Rprintf("\n");
 	if (i != 0) {
 		PRINT_TO_ERRMSG_BUF("i >= total_num_tchunks");
 		return -1;

@@ -23,6 +23,10 @@ RHDF5LIB_LIBS=$(shell "${R_HOME}/bin${R_ARCH_BIN}/Rscript" -e \
 
 PKG_LIBS=$(RHDF5LIB_LIBS)
 
+## Add -fopenmp flag if OpenMP is available.
+#PKG_CFLAGS=$(SHLIB_OPENMP_CFLAGS)
+#PKG_LIBS=$(RHDF5LIB_LIBS) $(SHLIB_OPENMP_CFLAGS)
+
 all: $(SHLIB)
 
 clean:
