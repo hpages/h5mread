@@ -2,8 +2,8 @@
 title: "The _h5mread_ package"
 author:
 - name: Hervé Pagès
-  affiliation: Fred Hutchinson Cancer Research Center, Seattle, WA
-date: "Compiled `r doc_date()`; Modified 1 December 2024"
+  affiliation: Fred Hutch Cancer Center, Seattle, WA
+date: "Compiled `r doc_date()`; Modified 14 January 2025"
 package: h5mread
 vignette: |
   %\VignetteIndexEntry{The h5mread package}
