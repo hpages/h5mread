@@ -24,7 +24,7 @@ dataset into R, similarly to what the `h5read()` function from the
 implementation has been optimized to make it as fast and memory-efficient
 as possible.
 
-In addition to the `h5mread()` function the package also provides the
+In addition to the `h5mread()` function, the package also provides the
 following low-level functionality:
 
 - `h5dim()` and `h5chunkdim()`;

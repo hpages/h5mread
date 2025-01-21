@@ -191,8 +191,7 @@ H5FileID <- function(filepath, s3=FALSE, s3credentials=NULL, use.rhdf5=FALSE)
     reg.finalizer(xp,
                   function(e) .close_H5FileID_xp(e, use.rhdf5=use.rhdf5),
                   onexit=TRUE)
-    Class <- getClassDef("H5FileID", package="h5mread", inherits=FALSE)
-    new2(Class, xp=xp, from_rhdf5=use.rhdf5)
+    new2("H5FileID", xp=xp, from_rhdf5=use.rhdf5)
 }
 
 setMethod("show", "H5FileID",
@@ -270,19 +269,17 @@ H5File <- function(filepath, s3=FALSE, s3credentials=NULL, .no_rhdf5_h5id=FALSE)
 
     h5mread_h5id <- H5FileID(filepath, s3=s3, s3credentials=s3credentials)
     if (.no_rhdf5_h5id) {
-        Class <- getClassDef("H5FileID", package="h5mread", inherits=FALSE)
-        rhdf5_h5id <- new(Class)
+        rhdf5_h5id <- new("H5FileID")
     } else {
         rhdf5_h5id <- H5FileID(filepath, s3=s3, s3credentials=s3credentials,
                                          use.rhdf5=TRUE)
     }
     if (!s3)
         filepath <- file_path_as_absolute(filepath)
-    Class <- getClassDef("H5File", package="h5mread", inherits=FALSE)
-    new2(Class, filepath=filepath, s3=s3,
-                h5mread_h5id=h5mread_h5id,
-                no_rhdf5_h5id=.no_rhdf5_h5id,
-                rhdf5_h5id=rhdf5_h5id)
+    new2("H5File", filepath=filepath, s3=s3,
+                   h5mread_h5id=h5mread_h5id,
+                   no_rhdf5_h5id=.no_rhdf5_h5id,
+                   rhdf5_h5id=rhdf5_h5id)
 }
 
 setMethod("show", "H5File",

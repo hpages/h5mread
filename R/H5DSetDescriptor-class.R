@@ -25,8 +25,7 @@ H5DSetDescriptor <- function(filepath, name, as.integer=FALSE)
     xp <- .Call2("C_new_H5DSetDescriptor_xp", filepath, name, as.integer,
                                               PACKAGE="h5mread")
     reg.finalizer(xp, .destroy_H5DSetDescriptor_xp, onexit=TRUE)
-    Class <- getClassDef("H5DSetDescriptor", package="h5mread", inherits=FALSE)
-    new2(Class, xp=xp)
+    new2("H5DSetDescriptor", xp=xp)
 }
 
 destroy_H5DSetDescriptor <- function(x)

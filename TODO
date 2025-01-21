@@ -3,6 +3,13 @@
 - Make h5mread(..., as.sparse=TRUE) natively return an SVT_SparseArray rather
   than a COO_SparseArray object.
 
+- h5mread():
+    * Support datasets with zero dimensions i.e. with ndim (a.k.a. rank
+      in HDF5 terminology) = 0.
+      system.file("extdata", "krumsiek11.h5ad", package="zellkonverter")
+      contains several of such datasets.
+    * Support compound datasets.
+
 - Resume work on h5summarize().
 
 - The reshaping operation that is currently performed by

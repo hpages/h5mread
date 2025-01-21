@@ -1,6 +1,11 @@
 \name{h5dim}
 
 \alias{h5exists}
+\alias{h5isdataset}
+\alias{h5isgroup}
+
+\alias{dim_as_integer}
+
 \alias{h5dim}
 \alias{h5chunkdim}
 
